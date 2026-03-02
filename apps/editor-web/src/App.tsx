@@ -53,17 +53,41 @@ type PhraseMatch = {
 };
 
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
-const DEFAULT_SMART_CLEANUP_PHRASES = [
+const FIXED_SMART_CLEANUP_PHRASES = [
+  // Auditory
   "um",
   "uh",
+  "ah",
+  "er",
+  "mm-hmm",
+  // Crutch
   "like",
-  "you know",
-  "i mean",
-  "so",
-  "we're going to",
   "basically",
   "actually",
   "literally",
+  "seriously",
+  "honestly",
+  "obviously",
+  // Transitional
+  "so",
+  "and",
+  "but",
+  "anyway",
+  "well",
+  "now",
+  // Validation
+  "right?",
+  "you know?",
+  "okay?",
+  "make sense?",
+  "you see?",
+  // Phrasal
+  "i mean",
+  "at the end of the day",
+  "to be honest with you",
+  "for all intents and purposes",
+  "as a matter of fact",
+  "it is what it is",
 ] as const;
 
 function isVideoFile(name: string) {
@@ -88,54 +112,38 @@ function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
   const normalizedTokens = tokens.map((token) => ({ token, normalized: normalizeText(token.text) })).filter((t) => t.normalized.length > 0);
   if (normalizedTokens.length === 0) return [];
 
-  const candidatePhrases = new Set<string>(DEFAULT_SMART_CLEANUP_PHRASES.map((phrase) => normalizeText(phrase)));
-
-  const unigramCounts = new Map<string, number>();
-  const bigramCounts = new Map<string, number>();
-  for (let i = 0; i < normalizedTokens.length; i += 1) {
-    const unigram = normalizedTokens[i]!.normalized;
-    unigramCounts.set(unigram, (unigramCounts.get(unigram) ?? 0) + 1);
-
-    if (i + 1 < normalizedTokens.length) {
-      const bigram = `${unigram} ${normalizedTokens[i + 1]!.normalized}`;
-      bigramCounts.set(bigram, (bigramCounts.get(bigram) ?? 0) + 1);
-    }
-  }
-
-  for (const [phrase, count] of unigramCounts) {
-    if (count >= 3 && phrase.length <= 12) candidatePhrases.add(phrase);
-  }
-  for (const [phrase, count] of bigramCounts) {
-    if (count >= 2) candidatePhrases.add(phrase);
-  }
+  const fixedPhrases = FIXED_SMART_CLEANUP_PHRASES.map((phrase) => {
+    const normalizedPhrase = normalizeText(phrase);
+    return {
+      phrase,
+      normalizedPhrase,
+      phraseParts: normalizedPhrase.split(" ").filter(Boolean),
+    };
+  }).filter((entry) => entry.normalizedPhrase.length > 0 && entry.phraseParts.length > 0);
 
   const results: PhraseMatch[] = [];
-  for (const phrase of candidatePhrases) {
-    if (!phrase) continue;
-    const phraseParts = phrase.split(" ").filter(Boolean);
-    if (phraseParts.length === 0) continue;
-
+  for (const entry of fixedPhrases) {
     const tokenIds: string[] = [];
-    for (let i = 0; i <= normalizedTokens.length - phraseParts.length; i += 1) {
+    for (let i = 0; i <= normalizedTokens.length - entry.phraseParts.length; i += 1) {
       let isMatch = true;
-      for (let j = 0; j < phraseParts.length; j += 1) {
-        if (normalizedTokens[i + j]!.normalized !== phraseParts[j]) {
+      for (let j = 0; j < entry.phraseParts.length; j += 1) {
+        if (normalizedTokens[i + j]!.normalized !== entry.phraseParts[j]) {
           isMatch = false;
           break;
         }
       }
       if (isMatch) {
-        for (let j = 0; j < phraseParts.length; j += 1) {
+        for (let j = 0; j < entry.phraseParts.length; j += 1) {
           tokenIds.push(normalizedTokens[i + j]!.token.id);
         }
       }
     }
 
-    const count = tokenIds.length / phraseParts.length;
+    const count = tokenIds.length / entry.phraseParts.length;
     if (count > 0) {
       results.push({
-        phrase,
-        normalizedPhrase: phrase,
+        phrase: entry.phrase,
+        normalizedPhrase: entry.normalizedPhrase,
         tokenIds,
         count,
       });
@@ -792,7 +800,7 @@ export function App() {
 
           <aside className="cleanupPanel">
             <h3>Smart Cleanup</h3>
-            <div className="hint">Frequent filler words & phrases detected from transcript.</div>
+            <div className="hint">Fixed filler words & phrases matched from transcript.</div>
             {visiblePhraseMatches.length === 0 ? (
               <div className="hint">No cleanup phrases found.</div>
             ) : (

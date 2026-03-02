@@ -2,6 +2,8 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 
 const FILE_ROOTS = {
   inbox: "/home/bit/.openclaw/workspace/inbox",
@@ -10,6 +12,21 @@ const FILE_ROOTS = {
 
 type RootName = keyof typeof FILE_ROOTS;
 
+type TranscribeJob = {
+  id: string;
+  status: "queued" | "running" | "done" | "error";
+  root: RootName;
+  relPath: string;
+  transcriptRelPath: string;
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number | null;
+  error?: string;
+  log: string[];
+};
+
+const jobs = new Map<string, TranscribeJob>();
+
 function safeResolve(root: RootName, relPath: string): string | null {
   const base = path.resolve(FILE_ROOTS[root]);
   const target = path.resolve(base, relPath || ".");
@@ -17,6 +34,11 @@ function safeResolve(root: RootName, relPath: string): string | null {
     return target;
   }
   return null;
+}
+
+function pushLog(job: TranscribeJob, line: string) {
+  job.log.push(line);
+  if (job.log.length > 250) job.log.shift();
 }
 
 function studioApiPlugin(): Plugin {
@@ -61,7 +83,7 @@ function studioApiPlugin(): Plugin {
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ root, relDir, entries }));
-        } catch (error) {
+        } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to list files" }));
         }
@@ -141,6 +163,131 @@ function studioApiPlugin(): Plugin {
           fs.createReadStream(absPath).pipe(res);
         } catch {
           send(500, "Failed to read media");
+        }
+      });
+
+      server.middlewares.use("/api/transcribe/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? "inbox") as RootName;
+          const relPath = String(body.path ?? "");
+          const model = String(body.model ?? "small");
+          const device = String(body.device ?? "cpu");
+          const computeType = String(body.computeType ?? "int8");
+          const language = String(body.language ?? "en");
+
+          if (!(root in FILE_ROOTS)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const baseName = path.basename(relPath, path.extname(relPath));
+          const cleanName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const transcriptRelPath = path.join("data", "transcripts", `${cleanName}.json`);
+
+          const id = crypto.randomUUID();
+          const job: TranscribeJob = {
+            id,
+            status: "queued",
+            root,
+            relPath,
+            transcriptRelPath,
+            startedAt: Date.now(),
+            log: [],
+          };
+          jobs.set(id, job);
+
+          const venvPython = path.resolve(process.cwd(), ".venv", "bin", "python3");
+          const hasVenv = fs.existsSync(venvPython);
+          const command = hasVenv
+            ? `${venvPython} scripts/transcribe_whisper.py`
+            : "python3 scripts/transcribe_whisper.py";
+
+          const wavPath = path.resolve(process.cwd(), "data", "audio", `${cleanName}.wav`);
+          fs.mkdirSync(path.dirname(wavPath), { recursive: true });
+          fs.mkdirSync(path.resolve(process.cwd(), "data", "transcripts"), { recursive: true });
+
+          job.status = "running";
+          pushLog(job, `Extracting audio from ${relPath}`);
+
+          const ff = spawn("bash", ["scripts/extract-audio-wav.sh", absMedia, wavPath], {
+            cwd: process.cwd(),
+          });
+
+          ff.stdout.on("data", (d) => pushLog(job, String(d)));
+          ff.stderr.on("data", (d) => pushLog(job, String(d)));
+
+          ff.on("close", (ffCode) => {
+            if (ffCode !== 0) {
+              job.status = "error";
+              job.exitCode = ffCode;
+              job.error = `Audio extraction failed (${ffCode})`;
+              job.endedAt = Date.now();
+              return;
+            }
+
+            pushLog(job, `Running Whisper (${model}, ${device}, ${computeType})`);
+
+            const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --language "${language}" --out "${transcriptRelPath}"`], {
+              cwd: process.cwd(),
+            });
+
+            tr.stdout.on("data", (d) => pushLog(job, String(d)));
+            tr.stderr.on("data", (d) => pushLog(job, String(d)));
+            tr.on("close", (trCode) => {
+              job.exitCode = trCode;
+              job.endedAt = Date.now();
+              if (trCode === 0) {
+                job.status = "done";
+                pushLog(job, `Done: ${transcriptRelPath}`);
+              } else {
+                job.status = "error";
+                job.error = `Whisper failed (${trCode})`;
+              }
+            });
+          });
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ jobId: id, status: job.status }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to start transcription" }));
+        }
+      });
+
+      server.middlewares.use("/api/transcribe/status", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = jobs.get(id);
+          if (!job) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Job not found" }));
+            return;
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(job));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to fetch status" }));
         }
       });
     },

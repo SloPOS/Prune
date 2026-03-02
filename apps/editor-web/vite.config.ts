@@ -59,6 +59,24 @@ type RangeInput = {
   sourceEndSec?: number;
 };
 
+
+type AnalysisCandidate = {
+  id: string;
+  kind: "breath" | "noise_click";
+  startSec: number;
+  endSec: number;
+  confidence: "low" | "medium" | "high";
+  score: number;
+  reason: string;
+};
+
+type SubtitleTokenInput = {
+  id?: string;
+  text?: string;
+  startSec?: number;
+  endSec?: number;
+};
+
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
@@ -209,6 +227,144 @@ function ffmpegHasEncoder(name: string): boolean {
   }
 }
 
+
+function parseWavMono16(absWavPath: string): { sampleRate: number; samples: Float32Array } {
+  const buf = fs.readFileSync(absWavPath);
+  if (buf.length < 44) throw new Error("WAV too small");
+  if (buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") throw new Error("Invalid WAV header");
+
+  let offset = 12;
+  let sampleRate = 16000;
+  let channels = 1;
+  let bitsPerSample = 16;
+  let dataStart = -1;
+  let dataSize = 0;
+
+  while (offset + 8 <= buf.length) {
+    const chunkId = buf.toString("ascii", offset, offset + 4);
+    const chunkSize = buf.readUInt32LE(offset + 4);
+    const chunkDataStart = offset + 8;
+    if (chunkId === "fmt ") {
+      const audioFormat = buf.readUInt16LE(chunkDataStart);
+      channels = buf.readUInt16LE(chunkDataStart + 2);
+      sampleRate = buf.readUInt32LE(chunkDataStart + 4);
+      bitsPerSample = buf.readUInt16LE(chunkDataStart + 14);
+      if (audioFormat !== 1) throw new Error("Only PCM WAV is supported");
+    } else if (chunkId === "data") {
+      dataStart = chunkDataStart;
+      dataSize = chunkSize;
+      break;
+    }
+    offset = chunkDataStart + chunkSize + (chunkSize % 2);
+  }
+
+  if (dataStart < 0) throw new Error("Missing WAV data chunk");
+  if (channels !== 1 || bitsPerSample !== 16) throw new Error("Expected mono 16-bit WAV");
+
+  const sampleCount = Math.floor(dataSize / 2);
+  const samples = new Float32Array(sampleCount);
+  for (let i = 0; i < sampleCount; i += 1) samples[i] = buf.readInt16LE(dataStart + i * 2) / 32768;
+  return { sampleRate, samples };
+}
+
+function rollingRms(samples: Float32Array, start: number, end: number): number {
+  let sum = 0;
+  for (let i = start; i < end; i += 1) {
+    const v = samples[i] ?? 0;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / Math.max(1, end - start));
+}
+
+function detectBreathCandidates(samples: Float32Array, sampleRate: number, speechGaps: Array<{ startSec: number; endSec: number }>): AnalysisCandidate[] {
+  const candidates: AnalysisCandidate[] = [];
+  const win = Math.max(64, Math.round(sampleRate * 0.035));
+  const stride = Math.max(32, Math.round(win / 2));
+  const probeN = Math.max(win, Math.floor(Math.min(8, samples.length / sampleRate) * sampleRate));
+  const baseline = rollingRms(samples, 0, probeN);
+  const maxAmp = samples.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+
+  for (const gap of speechGaps) {
+    const dur = gap.endSec - gap.startSec;
+    if (dur < 0.2 || dur > 1.5) continue;
+    const start = Math.max(0, Math.floor(gap.startSec * sampleRate));
+    const end = Math.min(samples.length, Math.ceil(gap.endSec * sampleRate));
+    if (end - start < win) continue;
+
+    let best: { rms: number; peak: number; from: number; to: number } | null = null;
+    for (let i = start; i + win <= end; i += stride) {
+      const j = i + win;
+      const rms = rollingRms(samples, i, j);
+      let peak = 0;
+      for (let k = i; k < j; k += 1) peak = Math.max(peak, Math.abs(samples[k] ?? 0));
+      if (!best || rms > best.rms) best = { rms, peak, from: i, to: j };
+    }
+    if (!best) continue;
+
+    const rmsRatio = baseline > 0 ? best.rms / baseline : 0;
+    const peakRatio = maxAmp > 0 ? best.peak / maxAmp : 0;
+    if (!(rmsRatio >= 1.3 && rmsRatio <= 3.5 && peakRatio < 0.42)) continue;
+
+    const score = Math.min(1, Math.max(0, ((rmsRatio - 1.3) / 2.2) * 0.7 + ((0.42 - peakRatio) / 0.42) * 0.3));
+    const confidence: AnalysisCandidate["confidence"] = score >= 0.72 ? "high" : score >= 0.52 ? "medium" : "low";
+    if (confidence === "low") continue;
+
+    candidates.push({
+      id: `breath-${gap.startSec.toFixed(3)}-${gap.endSec.toFixed(3)}`,
+      kind: "breath",
+      startSec: best.from / sampleRate,
+      endSec: best.to / sampleRate,
+      confidence,
+      score,
+      reason: `gap=${dur.toFixed(2)}s rms×${rmsRatio.toFixed(2)} peak=${best.peak.toFixed(2)}`,
+    });
+  }
+
+  return candidates;
+}
+
+function detectNoiseClickCandidates(samples: Float32Array, sampleRate: number): AnalysisCandidate[] {
+  const absVals = new Float32Array(samples.length);
+  let maxAmp = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const a = Math.abs(samples[i] ?? 0);
+    absVals[i] = a;
+    if (a > maxAmp) maxAmp = a;
+  }
+  if (maxAmp < 0.1) return [];
+
+  const localWin = Math.max(32, Math.floor(sampleRate * 0.004));
+  const candidates: AnalysisCandidate[] = [];
+  for (let i = localWin; i < samples.length - localWin; i += 1) {
+    const v = absVals[i] ?? 0;
+    if (v < 0.55) continue;
+
+    let localMean = 0;
+    for (let j = i - localWin; j < i + localWin; j += 1) localMean += absVals[j] ?? 0;
+    localMean /= localWin * 2;
+    const ratio = localMean > 0 ? v / localMean : 0;
+    if (ratio < 5.5) continue;
+
+    const startSec = Math.max(0, i - Math.floor(sampleRate * 0.01)) / sampleRate;
+    const endSec = Math.min(samples.length, i + Math.floor(sampleRate * 0.01)) / sampleRate;
+    const score = Math.min(1, Math.max(0, ((v - 0.55) / 0.45) * 0.6 + ((ratio - 5.5) / 8) * 0.4));
+    const confidence: AnalysisCandidate["confidence"] = score >= 0.8 ? "high" : score >= 0.62 ? "medium" : "low";
+    if (confidence === "low") continue;
+
+    const prev = candidates[candidates.length - 1];
+    if (prev && startSec <= prev.endSec + 0.03) {
+      prev.endSec = Math.max(prev.endSec, endSec);
+      prev.score = Math.max(prev.score, score);
+      if (confidence === "high") prev.confidence = "high";
+      continue;
+    }
+
+    candidates.push({ id: `click-${startSec.toFixed(3)}`, kind: "noise_click", startSec, endSec, confidence, score, reason: `peak=${v.toFixed(2)} local×${ratio.toFixed(1)}` });
+  }
+
+  return candidates;
+}
+
 function inputHasAudio(absInput: string): boolean {
   try {
     const probe = spawnSync("ffprobe", ["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", absInput], { encoding: "utf-8" });
@@ -272,6 +428,116 @@ function sanitizeFcpxmlName(raw: string, sourceRelPath: string): string {
 function sanitizeScriptName(raw: string): string {
   const base = String(raw || "script").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${base || "script"}.txt`;
+}
+
+function sanitizeSubtitleName(raw: string, format: "srt" | "vtt", fallback = "subtitles"): string {
+  const baseRaw = String(raw || fallback).replace(/\.[^.]+$/, "");
+  const base = baseRaw.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || fallback}.${format}`;
+}
+
+function normalizeSubtitleTokens(raw: unknown): Array<{ id: string; text: string; startSec: number; endSec: number }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const token = item as SubtitleTokenInput;
+      const text = String(token.text ?? "").trim();
+      const startSec = Number(token.startSec);
+      const endSec = Number(token.endSec);
+      if (!text || !Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return null;
+      return { id: String(token.id ?? `tok-${index}`), text, startSec, endSec };
+    })
+    .filter((v): v is { id: string; text: string; startSec: number; endSec: number } => Boolean(v))
+    .sort((a, b) => a.startSec - b.startSec);
+}
+
+function joinCaptionTokens(tokens: Array<{ text: string }>): string {
+  const punctNoLeadSpace = /^[,.;:!?)]$/;
+  const openersNoTrailSpace = /^[(]$/;
+  let out = "";
+  for (const token of tokens) {
+    const text = token.text.trim();
+    if (!text) continue;
+    if (!out) out = text;
+    else if (punctNoLeadSpace.test(text)) out += text;
+    else if (openersNoTrailSpace.test(out.slice(-1))) out += text;
+    else out += ` ${text}`;
+  }
+  return out.trim();
+}
+
+function buildCaptionChunks(tokens: Array<{ text: string; startSec: number; endSec: number }>): Array<{ startSec: number; endSec: number; text: string }> {
+  if (tokens.length === 0) return [];
+
+  const maxGapSec = 0.9;
+  const maxDurationSec = 4.8;
+  const maxChars = 42;
+  const chunks: Array<{ startSec: number; endSec: number; text: string }> = [];
+  let current: typeof tokens = [];
+
+  const pushCurrent = () => {
+    if (current.length === 0) return;
+    const text = joinCaptionTokens(current);
+    if (!text) {
+      current = [];
+      return;
+    }
+    chunks.push({
+      startSec: current[0]!.startSec,
+      endSec: Math.max(current[current.length - 1]!.endSec, current[0]!.startSec + 0.05),
+      text,
+    });
+    current = [];
+  };
+
+  for (const token of tokens) {
+    if (current.length === 0) {
+      current.push(token);
+      continue;
+    }
+
+    const prev = current[current.length - 1]!;
+    const withToken = [...current, token];
+    const nextText = joinCaptionTokens(withToken);
+    const gapSec = token.startSec - prev.endSec;
+    const durationSec = token.endSec - current[0]!.startSec;
+    const endsSentence = /[.!?]["')\]]?$/.test(joinCaptionTokens(current));
+    const shouldSplit =
+      gapSec > maxGapSec ||
+      durationSec > maxDurationSec ||
+      (nextText.length > maxChars && current.length >= 3) ||
+      (endsSentence && durationSec >= 1.2);
+
+    if (shouldSplit) pushCurrent();
+    current.push(token);
+  }
+  pushCurrent();
+  return chunks;
+}
+
+function formatTime(sec: number, separator: "," | "."): string {
+  const totalMs = Math.max(0, Math.round(sec * 1000));
+  const hh = Math.floor(totalMs / 3600000);
+  const mm = Math.floor((totalMs % 3600000) / 60000);
+  const ss = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const pad3 = (n: number) => String(n).padStart(3, "0");
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}${separator}${pad3(ms)}`;
+}
+
+function buildSrt(chunks: Array<{ startSec: number; endSec: number; text: string }>): string {
+  return chunks
+    .map((c, i) => `${i + 1}\n${formatTime(c.startSec, ",")} --> ${formatTime(Math.max(c.endSec, c.startSec + 0.05), ",")}\n${c.text}\n`)
+    .join("\n");
+}
+
+function buildVtt(chunks: Array<{ startSec: number; endSec: number; text: string }>): string {
+  const body = chunks
+    .map((c) => `${formatTime(c.startSec, ".")} --> ${formatTime(Math.max(c.endSec, c.startSec + 0.05), ".")}\n${c.text}\n`)
+    .join("\n");
+  return `WEBVTT\n\n${body}`;
 }
 
 function sanitizeUploadName(raw: string): string {
@@ -988,6 +1254,54 @@ function studioApiPlugin(): Plugin {
         }
       });
 
+
+      server.middlewares.use("/api/subtitles/export", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const format = String(body.format ?? "srt").toLowerCase() === "vtt" ? "vtt" : "srt";
+          const includeDeleted = Boolean(body.includeDeleted);
+          const deletedIds = new Set(Array.isArray(body.deletedTokenIds) ? body.deletedTokenIds.map((v: unknown) => String(v)) : []);
+          const allTokens = normalizeSubtitleTokens(body.tokens);
+          const tokens = includeDeleted ? allTokens : allTokens.filter((token) => !deletedIds.has(token.id));
+
+          if (tokens.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No transcript tokens to export" }));
+            return;
+          }
+
+          const captionChunks = buildCaptionChunks(tokens);
+          if (captionChunks.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid subtitle chunks generated" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputName = sanitizeSubtitleName(String(body.outputName ?? "subtitles"), format, "subtitles");
+          const outputPath = path.join(exportDir, outputName);
+          const content = format === "vtt" ? buildVtt(captionChunks) : buildSrt(captionChunks);
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, `${content.trim()}\n`, "utf-8");
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ outputPath, format, captions: captionChunks.length }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export subtitles" }));
+        }
+      });
 
       server.middlewares.use("/api/script/export", async (req, res) => {
         try {

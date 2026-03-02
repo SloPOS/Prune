@@ -38,6 +38,13 @@ type ScriptExportState = {
   error: string | null;
 };
 
+type SubtitleExportState = {
+  status: "idle" | "working" | "done" | "error";
+  outputPath: string | null;
+  error: string | null;
+  format: "srt" | "vtt" | null;
+};
+
 type PhraseMatch = {
   phrase: string;
   normalizedPhrase: string;
@@ -202,7 +209,9 @@ export function App() {
   const [transcribe, setTranscribe] = useState<TranscribeState>({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
   const [exportState, setExportState] = useState<ExportState>({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
   const [scriptExport, setScriptExport] = useState<ScriptExportState>({ status: "idle", outputPath: null, error: null });
+  const [subtitleExport, setSubtitleExport] = useState<SubtitleExportState>({ status: "idle", outputPath: null, error: null, format: null });
   const [scriptIncludeDeleted, setScriptIncludeDeleted] = useState(false);
+  const [subtitleIncludeDeleted, setSubtitleIncludeDeleted] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
   const [previewCuts, setPreviewCuts] = useState(true);
@@ -465,6 +474,34 @@ export function App() {
     setScriptExport({ status: "done", outputPath: data.outputPath ?? null, error: null });
   }
 
+  async function exportSubtitles(format: "srt" | "vtt") {
+    if (tokens.length === 0) {
+      setSubtitleExport({ status: "error", outputPath: null, error: "Transcript is empty", format });
+      return;
+    }
+
+    setSubtitleExport({ status: "working", outputPath: null, error: null, format });
+    const response = await fetch("/api/subtitles/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        outputName: exportName || selectedMedia?.name || "edited",
+        format,
+        includeDeleted: subtitleIncludeDeleted,
+        deletedTokenIds: Array.from(deleted),
+        tokens,
+      }),
+    });
+
+    if (!response.ok) {
+      setSubtitleExport({ status: "error", outputPath: null, error: await response.text(), format });
+      return;
+    }
+
+    const data = await response.json();
+    setSubtitleExport({ status: "done", outputPath: data.outputPath ?? null, error: null, format });
+  }
+
   async function copyScriptToClipboard() {
     const text = buildScriptBody(tokens, deleted, scriptIncludeDeleted);
     if (text) await navigator.clipboard.writeText(text);
@@ -607,6 +644,15 @@ export function App() {
         </div>
         <div className="hint">Status: {scriptExport.status}{scriptExport.error ? ` — ${scriptExport.error}` : ""}</div>
         {scriptExport.outputPath && <div className="hint">Output path: {scriptExport.outputPath}</div>}
+
+        <h3>Subtitle Export</h3>
+        <label className="toggleRow"><input type="checkbox" checked={subtitleIncludeDeleted} onChange={(e) => setSubtitleIncludeDeleted(e.target.checked)} />Include deleted tokens</label>
+        <div className="row">
+          <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>{subtitleExport.status === "working" && subtitleExport.format === "srt" ? "Exporting .srt…" : "Export .srt"}</button>
+          <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>{subtitleExport.status === "working" && subtitleExport.format === "vtt" ? "Exporting .vtt…" : "Export .vtt"}</button>
+        </div>
+        <div className="hint">Status: {subtitleExport.status}{subtitleExport.format ? ` (${subtitleExport.format.toUpperCase()})` : ""}{subtitleExport.error ? ` — ${subtitleExport.error}` : ""}</div>
+        {subtitleExport.outputPath && <div className="hint">Output path: {subtitleExport.outputPath}</div>}
 
         <h3>Local file picker</h3>
         <div className="pickerPanel">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cutRangesFromDeletedTokens, keepRangesFromCuts, type WordToken } from "@bit-cut/core";
+import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@bit-cut/core";
 
 type RootName = "inbox" | "archive";
 type BrowserEntry = {
@@ -50,6 +50,27 @@ type PhraseMatch = {
   normalizedPhrase: string;
   tokenIds: string[];
   count: number;
+};
+
+type AnalysisCandidate = {
+  id: string;
+  kind: "breath" | "noise_click";
+  startSec: number;
+  endSec: number;
+  confidence: "low" | "medium" | "high";
+  score: number;
+  reason: string;
+};
+
+
+type GapSuggestion = {
+  id: string;
+  startSec: number;
+  endSec: number;
+  gapSec: number;
+  trimStartSec: number;
+  trimEndSec: number;
+  trimSec: number;
 };
 
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
@@ -163,6 +184,22 @@ function tokenAtTime(tokens: WordToken[], timeSec: number): number {
   return -1;
 }
 
+function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {
+  if (ranges.length === 0) return [];
+  const sorted = ranges
+    .filter((r) => Number.isFinite(r.startSec) && Number.isFinite(r.endSec) && r.endSec > r.startSec)
+    .sort((a, b) => a.startSec - b.startSec);
+  if (sorted.length === 0) return [];
+  const merged: TimeRange[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = merged[merged.length - 1]!;
+    const curr = sorted[i]!;
+    if (curr.startSec <= prev.endSec) prev.endSec = Math.max(prev.endSec, curr.endSec);
+    else merged.push({ ...curr });
+  }
+  return merged;
+}
+
 function buildScriptBody(tokens: WordToken[], deleted: Set<string>, includeDeleted = false): string {
   const filtered = includeDeleted ? tokens : tokens.filter((t) => !deleted.has(t.id));
   if (filtered.length === 0) return "";
@@ -218,6 +255,10 @@ export function App() {
   const [ignoredPhrases, setIgnoredPhrases] = useState<Set<string>>(new Set());
   const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(null);
   const [searchPhrase, setSearchPhrase] = useState("");
+  const [gapShortenerEnabled, setGapShortenerEnabled] = useState(false);
+  const [gapMinThresholdSec, setGapMinThresholdSec] = useState(0.8);
+  const [gapLeaveBehindSec, setGapLeaveBehindSec] = useState(0.12);
+  const [appliedGapCuts, setAppliedGapCuts] = useState<TimeRange[]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -282,7 +323,37 @@ export function App() {
     setVideoDurationSec(0);
   }, [videoSrc]);
 
-  const cuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
+  const tokenCuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
+  const gapSuggestions = useMemo(() => {
+    if (tokens.length < 2) return [] as GapSuggestion[];
+    const suggestions: GapSuggestion[] = [];
+    const leaveBehind = Math.max(0, gapLeaveBehindSec);
+    const minGap = Math.max(0, gapMinThresholdSec);
+    for (let i = 0; i < tokens.length - 1; i += 1) {
+      const prev = tokens[i]!;
+      const next = tokens[i + 1]!;
+      const gapSec = next.startSec - prev.endSec;
+      if (gapSec < minGap) continue;
+      const trimSec = gapSec - Math.min(leaveBehind, gapSec);
+      if (trimSec <= 0) continue;
+      const halfLeave = Math.min(leaveBehind, gapSec) / 2;
+      const trimStartSec = prev.endSec + halfLeave;
+      const trimEndSec = next.startSec - halfLeave;
+      if (trimEndSec <= trimStartSec) continue;
+      suggestions.push({
+        id: `gap-${i}`,
+        startSec: prev.endSec,
+        endSec: next.startSec,
+        gapSec,
+        trimStartSec,
+        trimEndSec,
+        trimSec,
+      });
+    }
+    return suggestions;
+  }, [tokens, gapLeaveBehindSec, gapMinThresholdSec]);
+  const effectiveGapCuts = useMemo(() => (gapShortenerEnabled ? appliedGapCuts : []), [appliedGapCuts, gapShortenerEnabled]);
+  const cuts = useMemo(() => mergeTimeRanges([...tokenCuts, ...effectiveGapCuts]), [tokenCuts, effectiveGapCuts]);
   const transcriptDurationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
   const keeps = useMemo(() => keepRangesFromCuts(transcriptDurationSec, cuts), [cuts, transcriptDurationSec]);
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
@@ -364,6 +435,7 @@ export function App() {
     setDeleted(new Set());
     setIgnoredPhrases(new Set());
     setHighlightedPhrase(null);
+    setAppliedGapCuts([]);
     return true;
   }
 
@@ -559,6 +631,64 @@ export function App() {
     setHighlightedPhrase((prev) => (prev === match.normalizedPhrase ? null : prev));
   }
 
+  function applyCandidate(candidate: AnalysisCandidate) {
+    const ids = tokens
+      .filter((t) => t.startSec < candidate.endSec && t.endSec > candidate.startSec)
+      .map((t) => t.id);
+    if (ids.length === 0) return;
+    setDeleted((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  }
+
+  function applyAllCandidates() {
+    if (analysisCandidates.length === 0) return;
+    setDeleted((prev) => {
+      const next = new Set(prev);
+      for (const candidate of analysisCandidates) {
+        for (const t of tokens) {
+          if (t.startSec < candidate.endSec && t.endSec > candidate.startSec) next.add(t.id);
+        }
+      }
+      return next;
+    });
+  }
+
+  async function runDetectionAnalysis() {
+    if (!selectedMedia || tokens.length === 0) return;
+    setAnalysisStatus("running");
+    setAnalysisError(null);
+
+    const tokenGaps = tokens.slice(0, -1)
+      .map((t, i) => ({ startSec: t.endSec, endSec: tokens[i + 1]!.startSec }))
+      .filter((g) => g.endSec > g.startSec && g.endSec - g.startSec >= 0.16 && g.endSec - g.startSec <= 2.2);
+
+    const response = await fetch("/api/analyze/suggest-cuts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        root: selectedMedia.root,
+        path: selectedMedia.path,
+        detectBreaths,
+        detectNoiseClicks,
+        tokenGaps,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      setAnalysisStatus("error");
+      setAnalysisError(err || "Detection failed");
+      return;
+    }
+
+    const data = await response.json();
+    setAnalysisCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+    setAnalysisStatus("idle");
+  }
+
   function onVideoTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
     const el = event.currentTarget;
     const t = el.currentTime;
@@ -573,6 +703,14 @@ export function App() {
       el.currentTime = seekTarget;
       setCurrentTimeSec(seekTarget);
     }
+  }
+
+
+
+  function applyGapSuggestions() {
+    if (gapSuggestions.length === 0) return;
+    const newCuts = gapSuggestions.map((s) => ({ startSec: s.trimStartSec, endSec: s.trimEndSec }));
+    setAppliedGapCuts((prev) => mergeTimeRanges([...prev, ...newCuts]));
   }
 
   function renderTree(root: RootName, relDir: string, depth = 0): React.ReactNode {
@@ -616,6 +754,27 @@ export function App() {
         {videoSrc ? <video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} /> : <div className="videoPlaceholder">No Media Loaded</div>}
 
         <label className="toggleRow"><input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />Preview Cuts (skip deleted sections during playback)</label>
+
+        <h3>Suggest-only Detection (v1)</h3>
+        <label className="toggleRow"><input type="checkbox" checked={detectBreaths} onChange={(e) => setDetectBreaths(e.target.checked)} />Detect breaths</label>
+        <label className="toggleRow"><input type="checkbox" checked={detectNoiseClicks} onChange={(e) => setDetectNoiseClicks(e.target.checked)} />Detect transient noise clicks</label>
+        <div className="row">
+          <button onClick={() => void runDetectionAnalysis()} disabled={!selectedMedia || tokens.length === 0 || analysisStatus === "running" || (!detectBreaths && !detectNoiseClicks)}>{analysisStatus === "running" ? "Analyzing…" : "Run detection"}</button>
+          <button onClick={() => applyAllCandidates()} disabled={analysisCandidates.length === 0}>Apply all as cuts</button>
+        </div>
+        {analysisError && <div className="error">{analysisError}</div>}
+        <div className="hint">Conservative heuristics to reduce false positives. Suggestions are optional.</div>
+        {analysisCandidates.length > 0 && (
+          <div className="suggestionsPanel">
+            {analysisCandidates.map((candidate) => (
+              <div key={candidate.id} className="suggestionItem">
+                <div><strong>{candidate.kind === "breath" ? "Breath" : "Noise click"}</strong> · {candidate.startSec.toFixed(2)}s–{candidate.endSec.toFixed(2)}s · {candidate.confidence}</div>
+                <div className="hint">{candidate.reason}</div>
+                <button onClick={() => applyCandidate(candidate)}>Mark as cut</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <h3>Speech-to-text</h3>
         <div className="hint">Select a local video, then click Start Whisper STT.</div>
@@ -701,6 +860,7 @@ export function App() {
             <ul>
               <li>Tokens: {tokens.length}</li>
               <li>Deleted tokens: {deleted.size}</li>
+              <li>Gap trims applied: {appliedGapCuts.length} ({appliedGapCuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0).toFixed(2)}s){gapShortenerEnabled ? "" : " (disabled)"}</li>
               <li>Cut ranges: {cuts.length} ({totalCutSec.toFixed(2)}s)</li>
               <li>Keep ranges: {keeps.length} ({totalKeepSec.toFixed(2)}s)</li>
             </ul>
@@ -734,6 +894,26 @@ export function App() {
                 })}
               </ul>
             )}
+
+            <h3 style={{ marginTop: 12 }}>Word-gap shortener</h3>
+            <label className="toggleRow"><input type="checkbox" checked={gapShortenerEnabled} onChange={(e) => setGapShortenerEnabled(e.target.checked)} />Enable applied gap trims in cut plan</label>
+            <div className="row">
+              <label className="hint">Min gap (sec)<br /><input type="number" min={0} step={0.05} value={gapMinThresholdSec} onChange={(e) => setGapMinThresholdSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
+              <label className="hint">Leave behind (sec)<br /><input type="number" min={0} step={0.05} value={gapLeaveBehindSec} onChange={(e) => setGapLeaveBehindSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
+            </div>
+            <div className="hint">Preview suggestions: {gapSuggestions.length}</div>
+            <div className="row">
+              <button onClick={applyGapSuggestions} disabled={gapSuggestions.length === 0}>Apply suggested gap trims</button>
+              <button onClick={() => setAppliedGapCuts([])} disabled={appliedGapCuts.length === 0}>Clear applied gap trims</button>
+            </div>
+            <ul className="cleanupList" style={{ maxHeight: 180 }}>
+              {gapSuggestions.length === 0 ? <li className="hint">No gaps above threshold.</li> : gapSuggestions.slice(0, 100).map((gap) => (
+                <li key={gap.id} className="cleanupItem">
+                  <div className="cleanupTitle"><span>{gap.startSec.toFixed(2)}s → {gap.endSec.toFixed(2)}s</span><span className="count">gap {gap.gapSec.toFixed(2)}s</span></div>
+                  <div className="hint">Trim: {gap.trimStartSec.toFixed(2)}s → {gap.trimEndSec.toFixed(2)}s ({gap.trimSec.toFixed(2)}s)</div>
+                </li>
+              ))}
+            </ul>
           </aside>
         </div>
 

@@ -7,8 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "echo 'TODO: build'",
-    "dev": "echo 'TODO: dev'",
+    "build": "npm --workspace apps/editor-web run build",
+    "dev": "npm --workspace apps/editor-web run dev",
     "test": "echo 'TODO: test'",
     "transcribe:install": "python3 -m pip install -r scripts/requirements.txt",
     "transcribe:extract": "bash scripts/extract-audio-wav.sh",

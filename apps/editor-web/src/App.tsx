@@ -27,6 +27,14 @@ type TranscribeState = {
   error: string | null;
 };
 
+type ExportState = {
+  jobId: string | null;
+  status: "idle" | "starting" | "running" | "done" | "error";
+  outputPath: string | null;
+  error: string | null;
+  log: string[];
+};
+
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
 
 function isVideoFile(name: string) {
@@ -80,12 +88,20 @@ export function App() {
   const [videoSrc, setVideoSrc] = useState<string>("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4");
   const [videoLabel, setVideoLabel] = useState<string>("Sample video");
   const [selectedMedia, setSelectedMedia] = useState<SelectedMedia>(null);
+  const [exportName, setExportName] = useState<string>("edited-cut");
   const [transcribe, setTranscribe] = useState<TranscribeState>({
     jobId: null,
     status: "idle",
     log: [],
     transcriptRelPath: null,
     error: null,
+  });
+  const [exportState, setExportState] = useState<ExportState>({
+    jobId: null,
+    status: "idle",
+    outputPath: null,
+    error: null,
+    log: [],
   });
 
   const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
@@ -117,6 +133,26 @@ export function App() {
 
     return () => window.clearInterval(timer);
   }, [transcribe.jobId, transcribe.status]);
+
+  useEffect(() => {
+    if (!exportState.jobId || (exportState.status !== "running" && exportState.status !== "starting")) return;
+
+    const timer = window.setInterval(async () => {
+      const query = new URLSearchParams({ jobId: exportState.jobId! }).toString();
+      const response = await fetch(`/api/export/status?${query}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setExportState((prev) => ({
+        ...prev,
+        status: data.status === "running" || data.status === "queued" ? "running" : data.status,
+        outputPath: data.outputPath ?? prev.outputPath,
+        error: data.error ?? null,
+        log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
+      }));
+    }, 1200);
+
+    return () => window.clearInterval(timer);
+  }, [exportState.jobId, exportState.status]);
 
   const cuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
   const durationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
@@ -178,7 +214,9 @@ export function App() {
       setVideoSrc(`/api/media?${query}`);
       setVideoLabel(`${root}: ${entry.relPath}`);
       setSelectedMedia({ root, path: entry.relPath, name: entry.name });
+      setExportName(`${entry.name.replace(/\.[^.]+$/, "")}-edited`);
       setTranscribe({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
+      setExportState({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
     }
   }
 
@@ -206,6 +244,31 @@ export function App() {
 
     const data = await response.json();
     setTranscribe((prev) => ({ ...prev, jobId: data.jobId, status: "running" }));
+  }
+
+  async function startExport() {
+    if (!selectedMedia) return;
+
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        root: selectedMedia.root,
+        path: selectedMedia.path,
+        outputName: exportName,
+        keepRanges: keeps,
+        cuts,
+      }),
+    });
+
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+
+    const data = await response.json();
+    setExportState((prev) => ({ ...prev, jobId: data.jobId, status: "running", outputPath: data.outputPath ?? null }));
   }
 
   async function loadLatestTranscript() {
@@ -243,6 +306,22 @@ export function App() {
         <div className="hint">Status: {transcribe.status}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
         {transcribe.transcriptRelPath && <div className="hint">Output: {transcribe.transcriptRelPath}</div>}
         {transcribe.log.length > 0 && <pre>{transcribe.log.join("")}</pre>}
+
+        <h3>Export</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <input
+            value={exportName}
+            onChange={(e) => setExportName(e.target.value)}
+            placeholder="Output file name"
+            style={{ minWidth: 220 }}
+          />
+          <button onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>
+            {exportState.status === "running" || exportState.status === "starting" ? "Exporting…" : "Export Edited Video"}
+          </button>
+        </div>
+        <div className="hint">Status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
+        {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
+        {exportState.log.length > 0 && <pre>{exportState.log.join("")}</pre>}
 
         <h3>Local file browser</h3>
         <div className="browserGrid">

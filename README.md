@@ -79,6 +79,7 @@ WHISPER_MODEL=medium WHISPER_LANGUAGE=en npm run transcribe:media -- data/source
 ```
 
 Supported env overrides:
+- `STT_BACKEND` (default `faster-whisper`; `whisper-cpp`/`openvino` toggle path reserved, not wired yet)
 - `WHISPER_MODEL` (default `small`)
 - `WHISPER_DEVICE` (default `cpu`)
 - `WHISPER_COMPUTE_TYPE` (default `int8`)
@@ -100,6 +101,8 @@ Routes:
 - `GET /health`
 - `GET /api/roots`
 - `GET /api/media?root=inbox|archive&dir=<relative>&recursive=0|1&limit=200`
+- `POST /api/export/start`
+- `GET /api/export/status?jobId=<uuid>`
 
 Behavior:
 - only two hardcoded roots are allowed:
@@ -111,6 +114,19 @@ Behavior:
 - transcript discovery checks, in order:
   - `<basename>.transcript.json`
   - `<basename>.json`
+
+Export API request body (`POST /api/export/start`):
+- `root`: `inbox` or `archive`
+- `path`: media file path relative to root
+- `outputName`: desired output filename (auto-sanitized, forced to `.mp4`)
+- `keepRanges`: array of `{ sourceStartSec, sourceEndSec }` or `{ startSec, endSec }`
+- `cuts`: optional fallback; keep ranges are computed if `keepRanges` is missing
+
+Export behavior:
+- output directory prefers `/mnt/video-archive/exports`
+- if that is unavailable, falls back to `data/exports/`
+- encoder prefers `h264_qsv` when available and auto-retries with `libx264` on failure
+- poll `GET /api/export/status?jobId=...` for status/logs/output path
 
 ## Immediate next steps
 

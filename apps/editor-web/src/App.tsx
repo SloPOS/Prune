@@ -46,6 +46,10 @@ function isVideoFile(name: string) {
   return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+function sanitizeBaseName(name: string) {
+  return name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 function normalizeTranscript(input: unknown): WordToken[] {
   const asArray = Array.isArray(input)
     ? input
@@ -109,10 +113,15 @@ async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: strin
 export function App() {
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
   const [tokens, setTokens] = useState<WordToken[]>(mockTranscript);
-  const [videoSrc, setVideoSrc] = useState<string>("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4");
-  const [videoLabel, setVideoLabel] = useState<string>("Sample video");
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoLabel, setVideoLabel] = useState<string>("No Media Loaded");
   const [selectedMedia, setSelectedMedia] = useState<SelectedMedia>(null);
   const [exportName, setExportName] = useState<string>("edited-cut");
+  const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
+  const [splitLeftPct, setSplitLeftPct] = useState<number>(58);
+  const [isResizing, setIsResizing] = useState(false);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+
   const [transcribe, setTranscribe] = useState<TranscribeState>({
     jobId: null,
     status: "idle",
@@ -129,7 +138,7 @@ export function App() {
   });
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
-  const [previewCuts, setPreviewCuts] = useState(false);
+  const [previewCuts, setPreviewCuts] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
@@ -141,6 +150,28 @@ export function App() {
     void Promise.all([loadDir("inbox", "."), loadDir("archive", ".")]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    function onMove(event: MouseEvent) {
+      if (!splitRef.current) return;
+      const rect = splitRef.current.getBoundingClientRect();
+      const pct = ((event.clientX - rect.left) / rect.width) * 100;
+      setSplitLeftPct(Math.min(78, Math.max(35, pct)));
+    }
+
+    function onUp() {
+      setIsResizing(false);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizing]);
 
   useEffect(() => {
     if (!transcribe.jobId || (transcribe.status !== "running" && transcribe.status !== "starting")) return;
@@ -194,11 +225,12 @@ export function App() {
     if (videoRef.current) videoRef.current.currentTime = 0;
     setCurrentTimeSec(0);
     setActiveTokenIndex(-1);
+    setVideoDurationSec(0);
   }, [videoSrc]);
 
   const cuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
-  const durationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
-  const keeps = useMemo(() => keepRangesFromCuts(durationSec, cuts), [cuts, durationSec]);
+  const transcriptDurationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
+  const keeps = useMemo(() => keepRangesFromCuts(transcriptDurationSec, cuts), [cuts, transcriptDurationSec]);
 
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
   const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
@@ -212,6 +244,10 @@ export function App() {
     const remaining = duration > progressSec && speed > 0 ? (duration - progressSec) / speed : 0;
     return { pct, speed, remaining, duration, progressSec };
   }, [transcribe]);
+
+  const timingDiffSec = Math.abs(videoDurationSec - transcriptDurationSec);
+  const timingValid = videoDurationSec > 0 && transcriptDurationSec > 0;
+  const timingMatch = timingValid && (timingDiffSec <= 1.25 || timingDiffSec / Math.max(videoDurationSec, 1) < 0.03);
 
   async function loadDir(root: RootName, relDir: string) {
     setBrowsers((prev) => ({ ...prev, [root]: { ...prev[root], loading: true, error: null } }));
@@ -233,21 +269,27 @@ export function App() {
     }
   }
 
-  async function loadTranscript(root: RootName, relPath: string) {
+  async function loadTranscript(root: RootName, relPath: string, silent = false) {
     const query = new URLSearchParams({ root, path: relPath }).toString();
     const response = await fetch(`/api/transcript?${query}`);
     if (!response.ok) {
-      alert(`Failed to load transcript: ${await response.text()}`);
-      return;
+      if (!silent) alert(`Failed to load transcript: ${await response.text()}`);
+      return false;
     }
     const data = await response.json();
     const nextTokens = normalizeTranscript(data);
     if (nextTokens.length === 0) {
-      alert("No valid transcript tokens found in JSON.");
-      return;
+      if (!silent) alert("No valid transcript tokens found in JSON.");
+      return false;
     }
     setTokens(nextTokens);
     setDeleted(new Set());
+    return true;
+  }
+
+  async function tryAutoLoadTranscript(root: RootName, fileName: string) {
+    const transcriptGuess = `transcripts/${sanitizeBaseName(fileName)}.json`;
+    await loadTranscript(root, transcriptGuess, true);
   }
 
   async function onEntryClick(root: RootName, entry: BrowserEntry) {
@@ -269,6 +311,7 @@ export function App() {
       setExportName(`${entry.name.replace(/\.[^.]+$/, "")}-edited`);
       setTranscribe({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
       setExportState({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
+      await tryAutoLoadTranscript(root, entry.name);
     }
   }
 
@@ -356,8 +399,7 @@ export function App() {
 
   async function loadLatestTranscript() {
     if (!selectedMedia) return;
-    const pathGuess = `transcripts/${selectedMedia.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
-    await loadTranscript(selectedMedia.root, pathGuess);
+    await loadTranscript(selectedMedia.root, `transcripts/${sanitizeBaseName(selectedMedia.name)}.json`);
   }
 
   function toggle(id: string) {
@@ -391,19 +433,31 @@ export function App() {
   }
 
   return (
-    <div className="page">
+    <div className="page split" ref={splitRef} style={{ gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
       <div className="pane videoPane">
         <h2>Video</h2>
         <div className="hint">Selected: {videoLabel}</div>
-        <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+
+        {videoSrc ? (
+          <video
+            ref={videoRef}
+            controls
+            src={videoSrc}
+            onTimeUpdate={onVideoTimeUpdate}
+            onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+          />
+        ) : (
+          <div className="videoPlaceholder">No Media Loaded</div>
+        )}
+
+        <label className="toggleRow">
           <input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />
           Preview Cuts (skip deleted sections during playback)
         </label>
-        <video ref={videoRef} controls width={640} src={videoSrc} onTimeUpdate={onVideoTimeUpdate} />
 
         <h3>Speech-to-text</h3>
         <div className="hint">Select a local video, then click Start Whisper STT.</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <div className="row">
           <button onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>
             {transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : "Start Whisper STT"}
           </button>
@@ -430,7 +484,7 @@ export function App() {
         )}
 
         <h3>Export</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <div className="row">
           <input
             value={exportName}
             onChange={(e) => setExportName(e.target.value)}
@@ -481,22 +535,34 @@ export function App() {
         </div>
       </div>
 
+      <div className={`splitHandle ${isResizing ? "active" : ""}`} onMouseDown={() => setIsResizing(true)} role="separator" aria-orientation="vertical" />
+
       <div className="pane transcriptPane">
-        <h2>Transcript (click words to cut)</h2>
-        <div className="hint">Load transcript by selecting any .json file or run Whisper above.</div>
+        <h2>Transcript</h2>
+        <div className="hint">Click words in-line to mark/remove cuts. Manual transcript selection from browser remains available.</div>
         <div className="hint">Playback: {currentTimeSec.toFixed(2)}s</div>
-        <div className="tokens">
+        <div className={`timingBadge ${timingMatch ? "ok" : "warn"}`}>
+          {timingValid
+            ? timingMatch
+              ? `Timing match ✓ (video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`
+              : `Timing warning ⚠ (Δ ${timingDiffSec.toFixed(2)}s · video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`
+            : "Timing check pending: load video + transcript"}
+        </div>
+
+        <p className="transcriptParagraph">
           {tokens.map((t, index) => {
             const isDeleted = deleted.has(t.id);
             const isActive = index === activeTokenIndex;
-            const className = ["token", isDeleted ? "deleted" : "", isActive ? "active" : ""].filter(Boolean).join(" ");
+            const className = ["tokenInline", isDeleted ? "deleted" : "", isActive ? "active" : ""].filter(Boolean).join(" ");
             return (
-              <button key={t.id} onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>
-                {t.text}
-              </button>
+              <span key={t.id}>
+                <button onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>
+                  {t.text}
+                </button>{" "}
+              </span>
             );
           })}
-        </div>
+        </p>
 
         <h3>Cut/keep summary</h3>
         <ul>

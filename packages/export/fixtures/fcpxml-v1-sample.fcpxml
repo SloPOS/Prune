@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r1" name="FFVideoFormatRateUndefined" frameDuration="1/24s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)" />
+    <asset id="r2" name="interview-a.mov" src="file:///media/interview-a.mov" start="86400/24s" duration="300/24s" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000" />
+  </resources>
+  <library>
+    <event name="bit-cut-studio">
+      <project name="Interview Cut v1">
+        <sequence format="r1" tcStart="86400/24s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <asset-clip name="interview-a.mov seg 1" ref="r2" offset="0/24s" start="86400/24s" duration="120/24s" />
+            <asset-clip name="interview-a.mov seg 2" ref="r2" offset="120/24s" start="86592/24s" duration="108/24s" />
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

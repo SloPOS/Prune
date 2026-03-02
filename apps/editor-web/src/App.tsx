@@ -88,6 +88,12 @@ const FIXED_SMART_CLEANUP_PHRASES = [
   "for all intents and purposes",
   "as a matter of fact",
   "it is what it is",
+  // Jacob-specific frequent fillers
+  "go ahead",
+  "gone ahead",
+  "let's go ahead",
+  "we're gonna",
+  "we're going to",
 ] as const;
 
 function isVideoFile(name: string) {

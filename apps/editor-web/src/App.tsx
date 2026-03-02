@@ -247,6 +247,8 @@ export function App() {
   const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
   const [splitLeftPct, setSplitLeftPct] = useState<number>(40);
   const [isResizing, setIsResizing] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"video" | "transcript">("video");
   const splitRef = useRef<HTMLDivElement | null>(null);
 
   const [roots, setRoots] = useState<RootConfig[]>([]);
@@ -343,8 +345,16 @@ export function App() {
     document.documentElement.setAttribute("data-theme", isLightMode ? "light" : "dark");
     window.localStorage.setItem("bitcut-theme", isLightMode ? "light" : "dark");
   }, [isLightMode]);
+
   useEffect(() => {
-    if (!isResizing) return;
+    const query = window.matchMedia("(max-width: 900px), (orientation: portrait) and (max-width: 1100px)");
+    const apply = () => setIsMobileLayout(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+  useEffect(() => {
+    if (!isResizing || isMobileLayout) return;
     function onMove(event: MouseEvent) {
       if (!splitRef.current) return;
       const rect = splitRef.current.getBoundingClientRect();
@@ -363,7 +373,7 @@ export function App() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [isResizing]);
+  }, [isResizing, isMobileLayout]);
 
   useEffect(() => {
     if (!isDraggingTokens) return;
@@ -1248,7 +1258,13 @@ export function App() {
 
   return (
     <>
-    <div className="page split" ref={splitRef} style={{ gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
+    <div className={`page split ${isMobileLayout ? `mobileLayout mobile-${mobilePane}` : ""}`} ref={splitRef} style={isMobileLayout ? undefined : { gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
+      {isMobileLayout && (
+        <div className="mobilePaneSwitch row">
+          <button className={mobilePane === "video" ? "active" : ""} onClick={() => setMobilePane("video")}>Media</button>
+          <button className={mobilePane === "transcript" ? "active" : ""} onClick={() => setMobilePane("transcript")}>Transcript</button>
+        </div>
+      )}
       <div className="pane videoPane">
         <h2>Video</h2>
         <div className="hint">Selected: {videoLabel}</div>

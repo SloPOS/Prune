@@ -10,6 +10,8 @@ const FILE_ROOTS = {
   archive: "/mnt/video-archive",
 } as const;
 
+const REPO_ROOT = path.resolve(__dirname, "../..");
+
 type RootName = keyof typeof FILE_ROOTS;
 
 type TranscribeJob = {
@@ -347,7 +349,8 @@ function studioApiPlugin(): Plugin {
 
           const baseName = path.basename(relPath, path.extname(relPath));
           const cleanName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
-          const transcriptRelPath = path.join("data", "transcripts", `${cleanName}.json`);
+          const transcriptRelPath = path.join("transcripts", `${cleanName}.json`);
+          const transcriptAbsPath = path.resolve(FILE_ROOTS[root], transcriptRelPath);
 
           const id = crypto.randomUUID();
           const job: TranscribeJob = {
@@ -361,21 +364,21 @@ function studioApiPlugin(): Plugin {
           };
           jobs.set(id, job);
 
-          const venvPython = path.resolve(process.cwd(), ".venv", "bin", "python3");
+          const venvPython = path.resolve(REPO_ROOT, ".venv", "bin", "python3");
           const hasVenv = fs.existsSync(venvPython);
-          const command = hasVenv
-            ? `${venvPython} scripts/transcribe_whisper.py`
-            : "python3 scripts/transcribe_whisper.py";
+          const transcribeScript = path.resolve(REPO_ROOT, "scripts", "transcribe_whisper.py");
+          const command = hasVenv ? `${venvPython} ${transcribeScript}` : `python3 ${transcribeScript}`;
 
-          const wavPath = path.resolve(process.cwd(), "data", "audio", `${cleanName}.wav`);
+          const wavPath = path.resolve(REPO_ROOT, "data", "audio", `${cleanName}.wav`);
           fs.mkdirSync(path.dirname(wavPath), { recursive: true });
-          fs.mkdirSync(path.resolve(process.cwd(), "data", "transcripts"), { recursive: true });
+          fs.mkdirSync(path.dirname(transcriptAbsPath), { recursive: true });
 
           job.status = "running";
-          pushLog(job, `Extracting audio from ${relPath}`);
+          pushLog(job, `Extracting audio from ${relPath}\n`);
 
-          const ff = spawn("bash", ["scripts/extract-audio-wav.sh", absMedia, wavPath], {
-            cwd: process.cwd(),
+          const extractScript = path.resolve(REPO_ROOT, "scripts", "extract-audio-wav.sh");
+          const ff = spawn("bash", [extractScript, absMedia, wavPath], {
+            cwd: REPO_ROOT,
           });
 
           ff.stdout.on("data", (d) => pushLog(job, String(d)));
@@ -392,8 +395,8 @@ function studioApiPlugin(): Plugin {
 
             pushLog(job, `Running Whisper (${model}, ${device}, ${computeType})`);
 
-            const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --language "${language}" --out "${transcriptRelPath}"`], {
-              cwd: process.cwd(),
+            const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --language "${language}" --out "${transcriptAbsPath}"`], {
+              cwd: REPO_ROOT,
             });
 
             tr.stdout.on("data", (d) => pushLog(job, String(d)));

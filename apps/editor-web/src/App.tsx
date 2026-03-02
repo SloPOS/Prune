@@ -273,8 +273,8 @@ export function App() {
 
   async function loadLatestTranscript() {
     if (!selectedMedia) return;
-    const pathGuess = `data/transcripts/${selectedMedia.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
-    await loadTranscript("inbox", pathGuess);
+    const pathGuess = `transcripts/${selectedMedia.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
+    await loadTranscript(selectedMedia.root, pathGuess);
   }
 
   function toggle(id: string) {

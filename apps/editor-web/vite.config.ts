@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
+import { exportFcpxmlV1, type KeepRange } from "../../packages/export/src/fcpxmlV1";
 
 const FILE_ROOTS = {
   inbox: "/home/bit/.openclaw/workspace/inbox",
@@ -25,6 +26,13 @@ type TranscribeJob = {
   exitCode?: number | null;
   error?: string;
   log: string[];
+  mediaDurationSec?: number;
+  phase: "queued" | "extracting" | "transcribing" | "finalizing" | "done" | "error";
+  extractionProgressSec?: number;
+  transcribedSec?: number;
+  phaseStartedAt?: number;
+  model?: string;
+  device?: string;
 };
 
 type ExportJob = {
@@ -51,6 +59,21 @@ type RangeInput = {
 
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
+const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
+
+
+type FcpxmlExportJob = {
+  id: string;
+  status: "done" | "error";
+  root: RootName;
+  relPath: string;
+  outputPath?: string;
+  outputName: string;
+  error?: string;
+  fps?: number;
+  timecode?: string;
+  createdAt: number;
+};
 
 function safeResolve(root: RootName, relPath: string): string | null {
   const base = path.resolve(FILE_ROOTS[root]);
@@ -64,6 +87,60 @@ function safeResolve(root: RootName, relPath: string): string | null {
 function pushLog(job: { log: string[] }, line: string) {
   job.log.push(line);
   if (job.log.length > 250) job.log.shift();
+}
+
+function probeDurationSec(absInput: string): number | undefined {
+  try {
+    const probe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", absInput], {
+      encoding: "utf-8",
+    });
+    const raw = (probe.stdout || "").trim();
+    const duration = Number(raw);
+    return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseFfmpegTimeSec(text: string): number | undefined {
+  const m = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!m) return undefined;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  const ss = Number(m[3]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return undefined;
+  return hh * 3600 + mm * 60 + ss;
+}
+
+function parseWhisperProgressSec(text: string): number | undefined {
+  const matches = [...text.matchAll(/\[(\d{2}:\d{2}\.\d{3})\s*->\s*(\d{2}:\d{2}\.\d{3})\]/g)];
+  if (matches.length === 0) return undefined;
+  const toSec = (stamp: string) => {
+    const [mm, rest] = stamp.split(":");
+    return Number(mm) * 60 + Number(rest);
+  };
+  let maxSec = 0;
+  for (const m of matches) {
+    const sec = toSec(m[2]);
+    if (Number.isFinite(sec)) maxSec = Math.max(maxSec, sec);
+  }
+  return maxSec > 0 ? maxSec : undefined;
+}
+
+function transcribeExpectedSpeed(device: string, model: string): number {
+  const d = device.toLowerCase();
+  const m = model.toLowerCase();
+  if (d.includes("cuda") || d.includes("gpu")) return 8;
+  if (m.includes("tiny")) return 1.8;
+  if (m.includes("base")) return 1.3;
+  if (m.includes("small")) return 1.0;
+  if (m.includes("medium")) return 0.65;
+  if (m.includes("large")) return 0.4;
+  return 0.8;
+}
+
+function clampPercent(v: number): number {
+  return Math.max(0, Math.min(100, Math.round(v)));
 }
 
 function resolveExportDir(): string {
@@ -139,6 +216,57 @@ function inputHasAudio(absInput: string): boolean {
   }
 }
 
+function pickRate(raw: string): number | undefined {
+  const value = String(raw || "").trim();
+  if (!value) return undefined;
+  if (value.includes("/")) {
+    const [a, b] = value.split("/").map(Number);
+    if (Number.isFinite(a) && Number.isFinite(b) && b > 0) return a / b;
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function probeFcpxmlMetadata(absInput: string): { fps: number; timecode: string; durationSec?: number } {
+  const durationSec = probeDurationSec(absInput);
+  try {
+    const probe = spawnSync(
+      "ffprobe",
+      [
+        "-v", "error",
+        "-print_format", "json",
+        "-show_entries",
+        "stream=r_frame_rate,avg_frame_rate:format_tags=timecode",
+        absInput,
+      ],
+      { encoding: "utf-8" },
+    );
+
+    const payload = JSON.parse(probe.stdout || "{}");
+    const stream = Array.isArray(payload.streams)
+      ? payload.streams.find((s: any) => pickRate(s?.avg_frame_rate) || pickRate(s?.r_frame_rate))
+      : undefined;
+
+    const fps =
+      pickRate(stream?.avg_frame_rate) ||
+      pickRate(stream?.r_frame_rate) ||
+      30;
+
+    const timecode = String(payload?.format?.tags?.timecode || "").trim() || "00:00:00:00";
+
+    return { fps, timecode, durationSec };
+  } catch {
+    return { fps: 30, timecode: "00:00:00:00", durationSec };
+  }
+}
+
+function sanitizeFcpxmlName(raw: string, sourceRelPath: string): string {
+  const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
+  const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "edited"}.fcpxml`;
+}
+
 function runFfmpeg(job: ExportJob, args: string[]): Promise<number | null> {
   return new Promise((resolve) => {
     const proc = spawn("ffmpeg", args, { cwd: process.cwd() });
@@ -150,6 +278,57 @@ function runFfmpeg(job: ExportJob, args: string[]): Promise<number | null> {
       resolve(1);
     });
   });
+}
+
+function estimateTranscribeStatus(job: TranscribeJob): { percent: number | null; etaSec: number | null; speedLabel: string | null } {
+  if (job.status === "done") return { percent: 100, etaSec: 0, speedLabel: "complete" };
+  if (job.status === "error") return { percent: null, etaSec: null, speedLabel: null };
+
+  const duration = job.mediaDurationSec;
+  const now = Date.now();
+
+  if (job.phase === "extracting") {
+    const p = duration && job.extractionProgressSec !== undefined ? clampPercent((job.extractionProgressSec / duration) * 35) : null;
+    return {
+      percent: p,
+      etaSec: null,
+      speedLabel: "extracting audio",
+    };
+  }
+
+  if (job.phase === "transcribing") {
+    const expectedSpeed = transcribeExpectedSpeed(job.device ?? "cpu", job.model ?? "small");
+    const elapsedSec = Math.max(1, Math.round((now - (job.phaseStartedAt ?? job.startedAt)) / 1000));
+
+    if (duration) {
+      let processedSec = job.transcribedSec;
+      let speed = processedSec !== undefined && elapsedSec > 0 ? processedSec / elapsedSec : undefined;
+      if (processedSec === undefined) {
+        processedSec = Math.min(duration, elapsedSec * expectedSpeed);
+        speed = expectedSpeed;
+      }
+      const percent = clampPercent(35 + (Math.min(duration, processedSec) / duration) * 65);
+      const remainingMediaSec = Math.max(0, duration - Math.min(duration, processedSec));
+      const etaSec = speed && speed > 0 ? Math.round(remainingMediaSec / speed) : null;
+      return {
+        percent,
+        etaSec,
+        speedLabel: speed && Number.isFinite(speed) ? `${speed.toFixed(2)}x realtime` : "transcribing",
+      };
+    }
+
+    return {
+      percent: null,
+      etaSec: null,
+      speedLabel: "transcribing",
+    };
+  }
+
+  return {
+    percent: job.status === "queued" ? 0 : null,
+    etaSec: null,
+    speedLabel: job.status === "queued" ? "queued" : null,
+  };
 }
 
 function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: { startSec: number; endSec: number }[], encoder: "h264_qsv" | "libx264", hasAudio: boolean): string[] {
@@ -361,6 +540,9 @@ function studioApiPlugin(): Plugin {
             transcriptRelPath,
             startedAt: Date.now(),
             log: [],
+            phase: "queued",
+            model,
+            device,
           };
           jobs.set(id, job);
 
@@ -374,6 +556,9 @@ function studioApiPlugin(): Plugin {
           fs.mkdirSync(path.dirname(transcriptAbsPath), { recursive: true });
 
           job.status = "running";
+          job.phase = "extracting";
+          job.phaseStartedAt = Date.now();
+          job.mediaDurationSec = probeDurationSec(absMedia);
           pushLog(job, `Extracting audio from ${relPath}\n`);
 
           const extractScript = path.resolve(REPO_ROOT, "scripts", "extract-audio-wav.sh");
@@ -381,34 +566,71 @@ function studioApiPlugin(): Plugin {
             cwd: REPO_ROOT,
           });
 
-          ff.stdout.on("data", (d) => pushLog(job, String(d)));
-          ff.stderr.on("data", (d) => pushLog(job, String(d)));
+          ff.stdout.on("data", (d) => {
+            const text = String(d);
+            const sec = parseFfmpegTimeSec(text);
+            if (sec !== undefined) {
+              job.extractionProgressSec = Math.max(job.extractionProgressSec ?? 0, sec);
+            }
+            pushLog(job, text);
+          });
+          ff.stderr.on("data", (d) => {
+            const text = String(d);
+            const sec = parseFfmpegTimeSec(text);
+            if (sec !== undefined) {
+              job.extractionProgressSec = Math.max(job.extractionProgressSec ?? 0, sec);
+            }
+            pushLog(job, text);
+          });
 
           ff.on("close", (ffCode) => {
             if (ffCode !== 0) {
               job.status = "error";
+              job.phase = "error";
               job.exitCode = ffCode;
               job.error = `Audio extraction failed (${ffCode})`;
               job.endedAt = Date.now();
               return;
             }
 
+            job.phase = "transcribing";
+            job.phaseStartedAt = Date.now();
+            if (job.mediaDurationSec !== undefined) {
+              job.extractionProgressSec = job.mediaDurationSec;
+            }
             pushLog(job, `Running Whisper (${model}, ${device}, ${computeType})`);
 
             const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --language "${language}" --out "${transcriptAbsPath}"`], {
               cwd: REPO_ROOT,
             });
 
-            tr.stdout.on("data", (d) => pushLog(job, String(d)));
-            tr.stderr.on("data", (d) => pushLog(job, String(d)));
+            tr.stdout.on("data", (d) => {
+              const text = String(d);
+              const sec = parseWhisperProgressSec(text);
+              if (sec !== undefined) {
+                job.transcribedSec = Math.max(job.transcribedSec ?? 0, sec);
+              }
+              pushLog(job, text);
+            });
+            tr.stderr.on("data", (d) => {
+              const text = String(d);
+              const sec = parseWhisperProgressSec(text);
+              if (sec !== undefined) {
+                job.transcribedSec = Math.max(job.transcribedSec ?? 0, sec);
+              }
+              pushLog(job, text);
+            });
             tr.on("close", (trCode) => {
               job.exitCode = trCode;
               job.endedAt = Date.now();
               if (trCode === 0) {
                 job.status = "done";
+                job.phase = "done";
+                if (job.mediaDurationSec !== undefined) job.transcribedSec = job.mediaDurationSec;
                 pushLog(job, `Done: ${transcriptRelPath}`);
               } else {
                 job.status = "error";
+                job.phase = "error";
                 job.error = `Whisper failed (${trCode})`;
               }
             });
@@ -432,8 +654,9 @@ function studioApiPlugin(): Plugin {
             res.end(JSON.stringify({ error: "Job not found" }));
             return;
           }
+          const progress = estimateTranscribeStatus(job);
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(job));
+          res.end(JSON.stringify({ ...job, percent: progress.percent, etaSec: progress.etaSec, speedLabel: progress.speedLabel }));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to fetch status" }));
@@ -535,6 +758,120 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to start export" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/fcpxml/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? "inbox") as RootName;
+          const relPath = String(body.path ?? "");
+          const outputName = sanitizeFcpxmlName(String(body.outputName ?? ""), relPath);
+          const keepRanges = normalizeKeepRanges(body);
+
+          if (!(root in FILE_ROOTS)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (keepRanges.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid keepRanges/cuts provided" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
+
+          const fcpxml = exportFcpxmlV1(
+            keepRanges.map((r, i, arr) => ({
+              sourceStartSec: r.startSec,
+              sourceEndSec: r.endSec,
+              outputStartSec: i === 0 ? 0 : arr.slice(0, i).reduce((sum, x) => sum + (x.endSec - x.startSec), 0),
+            })) as KeepRange[],
+            {
+              path: absMedia,
+              fps: sourceMetadata.fps,
+              timecode: sourceMetadata.timecode,
+              durationSec: sourceMetadata.durationSec,
+              name: path.basename(absMedia),
+            },
+            {
+              projectName: path.basename(outputName, ".fcpxml"),
+              sequenceName: path.basename(outputName, ".fcpxml"),
+              eventName: "bit-cut-studio",
+            },
+          );
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, fcpxml, "utf-8");
+
+          const id = crypto.randomUUID();
+          const job: FcpxmlExportJob = {
+            id,
+            status: "done",
+            root,
+            relPath,
+            outputPath,
+            outputName,
+            createdAt: Date.now(),
+            fps: sourceMetadata.fps,
+            timecode: sourceMetadata.timecode,
+          };
+          fcpxmlJobs.set(id, job);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            jobId: id,
+            status: job.status,
+            outputPath: outputPath,
+            downloadUrl: `/api/export/fcpxml/download?jobId=${id}`,
+            metadata: { fps: sourceMetadata.fps, timecode: sourceMetadata.timecode },
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export FCPXML" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/fcpxml/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = fcpxmlJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/xml; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download FCPXML" }));
         }
       });
 

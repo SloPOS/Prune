@@ -25,7 +25,8 @@ body {
   display: grid;
   gap: 0;
   padding: 14px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .pane {
@@ -33,6 +34,7 @@ body {
   border-radius: 12px;
   padding: 14px;
   min-width: 0;
+  min-height: 0;
   background: color-mix(in srgb, var(--panel) 92%, #000 8%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
@@ -248,3 +250,10 @@ summary { cursor: pointer; color: var(--muted); }
   .browserGrid { grid-template-columns: 1fr; }
   .transcriptLayout { grid-template-columns: 1fr; }
 }
+
+.videoPane { overflow: auto; }
+.transcriptPane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.transcriptLayout { flex: 1; min-height: 0; }
+.transcriptParagraph { max-height: 100%; overflow: auto; }
+.cleanupPanel { max-height: 100%; overflow: auto; }
+.transcriptSearchRow { align-items: center; }

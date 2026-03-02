@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type WordToken } from "@bit-cut/core";
-import { mockTranscript } from "./mockTranscript";
 
 type RootName = "inbox" | "archive";
 type BrowserEntry = {
@@ -69,10 +68,7 @@ const FIXED_SMART_CLEANUP_PHRASES = [
   "honestly",
   "obviously",
   // Transitional
-  "so",
-  "and",
-  "but",
-  "anyway",
+    "anyway",
   "well",
   "now",
   // Validation
@@ -157,6 +153,31 @@ function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
   }
 
   return results.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
+}
+
+function findPhraseTokenIds(tokens: WordToken[], phrase: string): string[] {
+  const normalizedPhrase = normalizeText(phrase);
+  const parts = normalizedPhrase.split(" ").filter(Boolean);
+  if (parts.length === 0) return [];
+
+  const normalizedTokens = tokens
+    .map((token) => ({ token, normalized: normalizeText(token.text) }))
+    .filter((t) => t.normalized.length > 0);
+
+  const ids: string[] = [];
+  for (let i = 0; i <= normalizedTokens.length - parts.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < parts.length; j += 1) {
+      if (normalizedTokens[i + j]!.normalized !== parts[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      for (let j = 0; j < parts.length; j += 1) ids.push(normalizedTokens[i + j]!.token.id);
+    }
+  }
+  return ids;
 }
 
 function normalizeTranscript(input: unknown): WordToken[] {
@@ -247,7 +268,7 @@ async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: strin
 
 export function App() {
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
-  const [tokens, setTokens] = useState<WordToken[]>(mockTranscript);
+  const [tokens, setTokens] = useState<WordToken[]>([]);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [videoLabel, setVideoLabel] = useState<string>("No Media Loaded");
   const [selectedMedia, setSelectedMedia] = useState<SelectedMedia>(null);
@@ -278,6 +299,7 @@ export function App() {
   const [previewCuts, setPreviewCuts] = useState(true);
   const [ignoredPhrases, setIgnoredPhrases] = useState<Set<string>>(new Set());
   const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(null);
+  const [searchPhrase, setSearchPhrase] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
@@ -393,11 +415,20 @@ export function App() {
     () => phraseMatches.filter((match) => !ignoredPhrases.has(match.normalizedPhrase)),
     [phraseMatches, ignoredPhrases],
   );
+  const searchedTokenIds = useMemo(() => {
+    if (!searchPhrase.trim()) return [];
+    return findPhraseTokenIds(tokens, searchPhrase);
+  }, [tokens, searchPhrase]);
+
   const highlightedTokenIds = useMemo(() => {
-    if (!highlightedPhrase) return new Set<string>();
-    const match = phraseMatches.find((item) => item.normalizedPhrase === highlightedPhrase);
-    return new Set(match?.tokenIds ?? []);
-  }, [highlightedPhrase, phraseMatches]);
+    const ids = new Set<string>();
+    if (highlightedPhrase) {
+      const match = phraseMatches.find((item) => item.normalizedPhrase === highlightedPhrase);
+      for (const id of match?.tokenIds ?? []) ids.add(id);
+    }
+    for (const id of searchedTokenIds) ids.add(id);
+    return ids;
+  }, [highlightedPhrase, phraseMatches, searchedTokenIds]);
 
   async function loadDir(root: RootName, relDir: string) {
     setBrowsers((prev) => ({ ...prev, [root]: { ...prev[root], loading: true, error: null } }));
@@ -602,6 +633,21 @@ export function App() {
     await navigator.clipboard.writeText(text);
   }
 
+
+  function removeSearchedMatches() {
+    if (searchedTokenIds.length === 0) return;
+    const unique = Array.from(new Set(searchedTokenIds));
+    const allDeleted = unique.every((id) => deleted.has(id));
+    setDeleted((prev) => {
+      const next = new Set(prev);
+      for (const id of unique) {
+        if (allDeleted) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
   function toggle(id: string) {
     setDeleted((prev) => {
       const next = new Set(prev);
@@ -783,7 +829,19 @@ export function App() {
               ? `Timing match ✓ (video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`
               : `Timing warning ⚠ (Δ ${timingDiffSec.toFixed(2)}s · video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`
             : "Timing check pending: load video + transcript"}
+        
+        <div className="row transcriptSearchRow">
+          <input
+            value={searchPhrase}
+            onChange={(e) => setSearchPhrase(e.target.value)}
+            placeholder="Search phrase in transcript"
+            style={{ minWidth: 260, flex: 1 }}
+          />
+          <div className="hint">Matches: {Math.floor(searchedTokenIds.length / Math.max(1, normalizeText(searchPhrase).split(" ").filter(Boolean).length || 1))}</div>
+          <button onClick={() => setSearchPhrase("")} disabled={!searchPhrase}>Clear</button>
+          <button onClick={() => removeSearchedMatches()} disabled={searchedTokenIds.length === 0}>Toggle remove matches</button>
         </div>
+</div>
 
         <div className="transcriptLayout">
           <p className="transcriptParagraph">

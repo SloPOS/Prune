@@ -6,16 +6,25 @@ import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import { exportFcpxmlV1, type KeepRange } from "../../packages/export/src/fcpxmlV1";
 
-const FILE_ROOTS = {
-  inbox: "/home/bit/.openclaw/workspace/inbox",
-  archive: "/mnt/video-archive",
-} as const;
-
-const UPLOAD_TARGET_DIR = "/mnt/video-archive/incoming/uploads";
-
 const REPO_ROOT = path.resolve(__dirname, "../..");
+type RootName = string;
+type StudioSettings = {
+  roots: Array<{ id: string; name: string; path: string }>;
+  uploadSubdir: string;
+  exportDir?: string;
+};
 
-type RootName = keyof typeof FILE_ROOTS;
+const SETTINGS_PATH = path.resolve(process.env.BITCUT_SETTINGS_PATH || path.join(REPO_ROOT, "data", "config.json"));
+const DEFAULT_SETTINGS: StudioSettings = {
+  roots: [
+    { id: "root-1", name: "Media", path: path.resolve(process.env.BITCUT_INBOX_ROOT || path.resolve(REPO_ROOT, "inbox")) },
+    { id: "root-2", name: "Archive", path: path.resolve(process.env.BITCUT_ARCHIVE_ROOT || path.resolve(REPO_ROOT, "data", "archive")) },
+  ],
+  uploadSubdir: (process.env.BITCUT_UPLOAD_SUBDIR || "incoming/uploads").replace(/^\/+/, ""),
+  exportDir: process.env.BITCUT_EXPORT_DIR,
+};
+
+let studioSettings: StudioSettings = loadSettings();
 
 type TranscribeJob = {
   id: string;
@@ -80,6 +89,7 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
+const PROJECTS_DIR = path.resolve(REPO_ROOT, "data", "projects");
 
 
 type FcpxmlExportJob = {
@@ -95,8 +105,64 @@ type FcpxmlExportJob = {
   createdAt: number;
 };
 
+function loadSettings(): StudioSettings {
+  try {
+    if (!fs.existsSync(SETTINGS_PATH)) return DEFAULT_SETTINGS;
+    const raw = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
+    const roots = Array.isArray(raw.roots)
+      ? raw.roots
+        .map((r: any, idx: number) => ({ id: String(r.id || `root-${idx + 1}`), name: String(r.name || `Root ${idx + 1}`), path: path.resolve(String(r.path || "")) }))
+        .filter((r: any) => r.path)
+      : DEFAULT_SETTINGS.roots;
+    return {
+      roots: roots.length > 0 ? roots : DEFAULT_SETTINGS.roots,
+      uploadSubdir: String(raw.uploadSubdir || DEFAULT_SETTINGS.uploadSubdir).replace(/^\/+/, ""),
+      exportDir: raw.exportDir ? path.resolve(String(raw.exportDir)) : DEFAULT_SETTINGS.exportDir,
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function saveSettings(next: StudioSettings) {
+  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(next, null, 2), "utf-8");
+  studioSettings = next;
+}
+
+function pathHealth(targetPath: string) {
+  const abs = path.resolve(targetPath);
+  const exists = fs.existsSync(abs);
+  const isDir = exists ? fs.statSync(abs).isDirectory() : false;
+  let readable = false;
+  let writable = false;
+  if (exists) {
+    try { fs.accessSync(abs, fs.constants.R_OK); readable = true; } catch {}
+    try { fs.accessSync(abs, fs.constants.W_OK); writable = true; } catch {}
+  }
+  return { path: abs, exists, isDir, readable, writable };
+}
+
+function getRootMap(): Record<string, string> {
+  return Object.fromEntries(studioSettings.roots.map((r) => [r.id, path.resolve(r.path)]));
+}
+
+function needsSetup(): boolean {
+  if (studioSettings.roots.length === 0) return true;
+  return studioSettings.roots.every((r) => {
+    try {
+      return !(fs.existsSync(r.path) && fs.statSync(r.path).isDirectory());
+    } catch {
+      return true;
+    }
+  });
+}
+
 function safeResolve(root: RootName, relPath: string): string | null {
-  const base = path.resolve(FILE_ROOTS[root]);
+  const rootMap = getRootMap();
+  const baseRaw = rootMap[root];
+  if (!baseRaw) return null;
+  const base = path.resolve(baseRaw);
   const target = path.resolve(base, relPath || ".");
   if (target === base || target.startsWith(`${base}${path.sep}`)) {
     return target;
@@ -164,7 +230,8 @@ function clampPercent(v: number): number {
 }
 
 function resolveExportDir(): string {
-  const preferred = "/mnt/video-archive/exports";
+  const firstRoot = studioSettings.roots[0]?.path || path.resolve(REPO_ROOT, "data", "archive");
+  const preferred = path.resolve(studioSettings.exportDir || path.join(firstRoot, "exports"));
   try {
     fs.mkdirSync(preferred, { recursive: true });
     fs.accessSync(preferred, fs.constants.W_OK);
@@ -180,6 +247,15 @@ function sanitizeOutputName(raw: string, sourceRelPath: string): string {
   const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
   const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${base || "edited"}.mp4`;
+}
+
+function projectKey(root: string, relPath: string): string {
+  return `${root}__${relPath}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function sanitizeProjectName(raw: string): string {
+  const name = String(raw || "Project").trim();
+  return name.replace(/[^a-zA-Z0-9 _.-]/g, "_").slice(0, 80) || "Project";
 }
 
 function normalizeRange(input: RangeInput): { startSec: number; endSec: number } | null {
@@ -693,13 +769,277 @@ function studioApiPlugin(): Plugin {
   return {
     name: "studio-local-api",
     configureServer(server) {
+      server.middlewares.use("/api/settings", async (req, res) => {
+        try {
+          if (req.method === "GET") {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ...studioSettings, needsSetup: needsSetup() }));
+            return;
+          }
+          if (req.method === "POST") {
+            const chunks: Buffer[] = [];
+            req.on("data", (c) => chunks.push(c));
+            await new Promise((resolve) => req.on("end", resolve));
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+            const roots = Array.isArray(body.roots)
+              ? body.roots
+                .map((r: any, idx: number) => ({ id: `root-${idx + 1}`, name: String(r.name || `Root ${idx + 1}`), path: path.resolve(String(r.path || "")) }))
+                .filter((r: any) => r.path)
+              : [];
+            if (roots.length === 0) {
+              res.statusCode = 400;
+              res.end("At least one root is required");
+              return;
+            }
+            for (const root of roots) {
+              if (!fs.existsSync(root.path) || !fs.statSync(root.path).isDirectory()) {
+                res.statusCode = 400;
+                res.end(`Root not found or not a directory: ${root.path}`);
+                return;
+              }
+            }
+            const next: StudioSettings = {
+              roots,
+              uploadSubdir: String(body.uploadSubdir || "incoming/uploads").replace(/^\/+/, ""),
+              exportDir: body.exportDir ? path.resolve(String(body.exportDir)) : undefined,
+            };
+            saveSettings(next);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true, ...studioSettings, needsSetup: needsSetup() }));
+            return;
+          }
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: "Method not allowed" }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to read/save settings" }));
+        }
+      });
+
+      server.middlewares.use("/api/settings/health", async (_req, res) => {
+        try {
+          const roots = studioSettings.roots.map((r) => ({ id: r.id, name: r.name, ...pathHealth(r.path) }));
+          const firstRoot = studioSettings.roots[0]?.path || process.cwd();
+          const uploadPath = path.join(firstRoot, studioSettings.uploadSubdir || "incoming/uploads");
+          const exportPath = studioSettings.exportDir || path.join(firstRoot, "exports");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ roots, upload: pathHealth(uploadPath), export: pathHealth(exportPath) }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed health check" }));
+        }
+      });
+
+      server.middlewares.use("/api/system/dirs", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const requested = url.searchParams.get("path") || "/";
+          const includeHidden = ["1", "true", "yes"].includes(String(url.searchParams.get("hidden") || "").toLowerCase());
+          const abs = path.resolve(requested);
+          if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Directory not found" }));
+            return;
+          }
+
+          const entries = fs.readdirSync(abs, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && (includeHidden || !entry.name.startsWith(".")))
+            .map((entry) => ({
+              name: entry.name,
+              path: path.join(abs, entry.name),
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+          const parent = abs === path.parse(abs).root ? null : path.dirname(abs);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ path: abs, parent, dirs: entries }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to list directories" }));
+        }
+      });
+
+      server.middlewares.use("/api/system/mkdir", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const basePath = path.resolve(String(body.path || "/"));
+          const name = String(body.name || "").trim();
+          if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid folder name" }));
+            return;
+          }
+          if (!fs.existsSync(basePath) || !fs.statSync(basePath).isDirectory()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Base directory not found" }));
+            return;
+          }
+          const target = path.join(basePath, name);
+          fs.mkdirSync(target, { recursive: false });
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, path: target }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to create folder" }));
+        }
+      });
+
+      server.middlewares.use("/api/project/save", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const root = String(body.root || "");
+          const relPath = String(body.path || "");
+          if (!root || !relPath) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Missing root/path" }));
+            return;
+          }
+          const key = projectKey(root, relPath);
+          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+          const id = String(body.projectId || crypto.randomUUID());
+          const projectName = sanitizeProjectName(String(body.projectName || path.basename(relPath)));
+          const payload = {
+            ...body,
+            projectId: id,
+            projectName,
+            root,
+            path: relPath,
+            key,
+            updatedAt: new Date().toISOString(),
+          };
+          const out = path.join(PROJECTS_DIR, `${id}.json`);
+          fs.writeFileSync(out, JSON.stringify(payload, null, 2), "utf-8");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, projectId: id, projectName, outputPath: out }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to save project" }));
+        }
+      });
+
+      server.middlewares.use("/api/project/list", async (_req, res) => {
+        try {
+          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+          const files = fs.readdirSync(PROJECTS_DIR).filter((n) => n.endsWith(".json"));
+          const projects = files.map((name) => {
+            try {
+              const data = JSON.parse(fs.readFileSync(path.join(PROJECTS_DIR, name), "utf-8"));
+              return {
+                projectId: data.projectId || path.basename(name, ".json"),
+                projectName: data.projectName || "Project",
+                root: data.root,
+                path: data.path,
+                updatedAt: data.updatedAt || null,
+              };
+            } catch {
+              return null;
+            }
+          }).filter(Boolean).sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ projects }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to list projects" }));
+        }
+      });
+
+      server.middlewares.use("/api/project/delete", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const projectId = String(body.projectId || "");
+          if (!projectId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Missing projectId" }));
+            return;
+          }
+          const file = path.join(PROJECTS_DIR, `${projectId}.json`);
+          if (fs.existsSync(file)) fs.unlinkSync(file);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to delete project" }));
+        }
+      });
+
+      server.middlewares.use("/api/project/load", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const projectId = String(url.searchParams.get("projectId") || "");
+          if (projectId) {
+            const file = path.join(PROJECTS_DIR, `${projectId}.json`);
+            if (!fs.existsSync(file)) {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: "Project not found" }));
+              return;
+            }
+            res.setHeader("Content-Type", "application/json");
+            res.end(fs.readFileSync(file, "utf-8"));
+            return;
+          }
+
+          const root = String(url.searchParams.get("root") || "");
+          const relPath = String(url.searchParams.get("path") || "");
+          if (!root || !relPath) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Missing root/path" }));
+            return;
+          }
+
+          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+          const files = fs.readdirSync(PROJECTS_DIR).filter((n) => n.endsWith(".json"));
+          for (const name of files) {
+            const file = path.join(PROJECTS_DIR, name);
+            try {
+              const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+              if (String(data.root) === root && String(data.path) === relPath) {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(data));
+                return;
+              }
+            } catch {}
+          }
+
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "Project not found" }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to load project" }));
+        }
+      });
+
       server.middlewares.use("/api/files", async (req, res) => {
         try {
           const url = new URL(req.url ?? "", "http://localhost");
-          const root = (url.searchParams.get("root") ?? "inbox") as RootName;
+          const root = (url.searchParams.get("root") ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relDir = url.searchParams.get("dir") ?? ".";
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -720,7 +1060,7 @@ function studioApiPlugin(): Plugin {
               return {
                 name: entry.name,
                 type: entry.isDirectory() ? "dir" : "file",
-                relPath: path.relative(FILE_ROOTS[root], absPath) || ".",
+                relPath: path.relative(rootMap[root]!, absPath) || ".",
                 sizeBytes: entry.isDirectory() ? null : stat.size,
               };
             })
@@ -746,8 +1086,9 @@ function studioApiPlugin(): Plugin {
           }
 
           const { file } = await parseMultipart(req);
-          const root: RootName = "archive";
-          const relDir = "incoming/uploads";
+          const root: RootName = studioSettings.roots[0]?.id ?? "";
+          const relDir = studioSettings.uploadSubdir;
+          const rootMap = getRootMap();
 
           if (!file) {
             res.statusCode = 400;
@@ -755,20 +1096,27 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          fs.mkdirSync(UPLOAD_TARGET_DIR, { recursive: true });
+          if (!rootMap[root]) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No upload root configured" }));
+            return;
+          }
+
+          const uploadTargetDir = path.join(rootMap[root]!, relDir);
+          fs.mkdirSync(uploadTargetDir, { recursive: true });
           let outputName = file.name;
-          let outputPath = path.join(UPLOAD_TARGET_DIR, outputName);
+          let outputPath = path.join(uploadTargetDir, outputName);
           let count = 1;
           while (fs.existsSync(outputPath)) {
             const ext = path.extname(file.name);
             const base = path.basename(file.name, ext);
             outputName = `${base}-${count}${ext}`;
-            outputPath = path.join(UPLOAD_TARGET_DIR, outputName);
+            outputPath = path.join(uploadTargetDir, outputName);
             count += 1;
           }
 
           fs.writeFileSync(outputPath, file.data);
-          const relPath = path.relative(FILE_ROOTS.archive, outputPath) || outputName;
+          const relPath = path.relative(rootMap[root]!, outputPath) || outputName;
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ root, relDir, relPath, savedPath: outputPath, sizeBytes: file.data.length }));
         } catch (error) {
@@ -780,10 +1128,11 @@ function studioApiPlugin(): Plugin {
       server.middlewares.use("/api/transcript", async (req, res) => {
         try {
           const url = new URL(req.url ?? "", "http://localhost");
-          const root = (url.searchParams.get("root") ?? "inbox") as RootName;
+          const root = (url.searchParams.get("root") ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = url.searchParams.get("path") ?? "";
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -819,13 +1168,14 @@ function studioApiPlugin(): Plugin {
           await new Promise((resolve) => req.on("end", resolve));
           const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 
-          const root = (body.root ?? "inbox") as RootName;
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = String(body.path ?? "");
           const detectBreaths = Boolean(body.detectBreaths ?? true);
           const detectNoiseClicks = Boolean(body.detectNoiseClicks ?? true);
           const tokenGaps = Array.isArray(body.tokenGaps) ? body.tokenGaps : [];
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -893,10 +1243,11 @@ function studioApiPlugin(): Plugin {
 
         try {
           const url = new URL(req.url ?? "", "http://localhost");
-          const root = (url.searchParams.get("root") ?? "inbox") as RootName;
+          const root = (url.searchParams.get("root") ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = url.searchParams.get("path") ?? "";
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) return send(400, "Invalid root");
+          if (!(root in rootMap)) return send(400, "Invalid root");
 
           const absPath = safeResolve(root, relPath);
           if (!absPath || !fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) return send(404, "File not found");
@@ -946,14 +1297,15 @@ function studioApiPlugin(): Plugin {
           await new Promise((resolve) => req.on("end", resolve));
           const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 
-          const root = (body.root ?? "inbox") as RootName;
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = String(body.path ?? "");
           const model = String(body.model ?? "small");
           const device = String(body.device ?? "cpu");
           const computeType = String(body.computeType ?? "int8");
           const language = String(body.language ?? "en");
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -969,7 +1321,7 @@ function studioApiPlugin(): Plugin {
           const baseName = path.basename(relPath, path.extname(relPath));
           const cleanName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
           const transcriptRelPath = path.join("transcripts", `${cleanName}.json`);
-          const transcriptAbsPath = path.resolve(FILE_ROOTS[root], transcriptRelPath);
+          const transcriptAbsPath = path.resolve(rootMap[root]!, transcriptRelPath);
 
           const id = crypto.randomUUID();
           const job: TranscribeJob = {
@@ -1116,12 +1468,13 @@ function studioApiPlugin(): Plugin {
           await new Promise((resolve) => req.on("end", resolve));
           const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 
-          const root = (body.root ?? "inbox") as RootName;
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = String(body.path ?? "");
           const outputName = sanitizeOutputName(String(body.outputName ?? ""), relPath);
           const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -1214,12 +1567,13 @@ function studioApiPlugin(): Plugin {
           await new Promise((resolve) => req.on("end", resolve));
           const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 
-          const root = (body.root ?? "inbox") as RootName;
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = String(body.path ?? "");
           const outputName = sanitizeFcpxmlName(String(body.outputName ?? ""), relPath);
           const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
 
-          if (!(root in FILE_ROOTS)) {
+          if (!(root in rootMap)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid root" }));
             return;
@@ -1315,6 +1669,28 @@ function studioApiPlugin(): Plugin {
         }
       });
 
+      server.middlewares.use("/api/export/capabilities", async (_req, res) => {
+        try {
+          const hasQsv = ffmpegHasEncoder("h264_qsv");
+          const hasNvenc = ffmpegHasEncoder("h264_nvenc");
+          const hasVt = ffmpegHasEncoder("h264_videotoolbox");
+          const hasX264 = ffmpegHasEncoder("libx264");
+          const options = [
+            hasQsv ? { format: "mp4", videoEncoder: "h264_qsv", speed: "fast" } : null,
+            hasNvenc ? { format: "mp4", videoEncoder: "h264_nvenc", speed: "fast" } : null,
+            hasVt ? { format: "mp4", videoEncoder: "h264_videotoolbox", speed: "fast" } : null,
+            hasX264 ? { format: "mp4", videoEncoder: "libx264", speed: "medium" } : null,
+            { format: "wav", videoEncoder: null, speed: "n/a" },
+            { format: "mp3", videoEncoder: null, speed: "n/a" },
+          ].filter(Boolean);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ options }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to read export capabilities" }));
+        }
+      });
+
       server.middlewares.use("/api/export/status", async (req, res) => {
         try {
           const url = new URL(req.url ?? "", "http://localhost");
@@ -1326,13 +1702,54 @@ function studioApiPlugin(): Plugin {
             return;
           }
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(job));
+          res.end(JSON.stringify({ ...job, downloadUrl: job.status === "done" ? `/api/export/download?jobId=${job.id}` : null }));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to fetch export status" }));
         }
       });
 
+      server.middlewares.use("/api/export/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = exportJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "video/mp4");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download export" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/cache/clear", async (_req, res) => {
+        try {
+          const exportDir = resolveExportDir();
+          const entries = fs.existsSync(exportDir) ? fs.readdirSync(exportDir) : [];
+          let removed = 0;
+          for (const name of entries) {
+            const ext = path.extname(name).toLowerCase();
+            if (![".mp4", ".mov", ".mkv", ".webm", ".m4v"].includes(ext)) continue;
+            try {
+              fs.unlinkSync(path.join(exportDir, name));
+              removed += 1;
+            } catch {}
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, removed }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to clear video cache" }));
+        }
+      });
 
       server.middlewares.use("/api/subtitles/export", async (req, res) => {
         try {
@@ -1366,16 +1783,13 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const exportDir = resolveExportDir();
           const outputName = sanitizeSubtitleName(String(body.outputName ?? "subtitles"), format, "subtitles");
-          const outputPath = path.join(exportDir, outputName);
-          const content = format === "vtt" ? buildVtt(captionChunks) : buildSrt(captionChunks);
+          const content = `${(format === "vtt" ? buildVtt(captionChunks) : buildSrt(captionChunks)).trim()}\n`;
 
-          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-          fs.writeFileSync(outputPath, `${content.trim()}\n`, "utf-8");
-
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ outputPath, format, captions: captionChunks.length }));
+          res.statusCode = 200;
+          res.setHeader("Content-Type", format === "vtt" ? "text/vtt; charset=utf-8" : "application/x-subrip; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${outputName}"`);
+          res.end(content);
         } catch (error) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export subtitles" }));
@@ -1402,14 +1816,11 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const exportDir = resolveExportDir();
           const outputName = sanitizeScriptName(String(body.outputName ?? "script"));
-          const outputPath = path.join(exportDir, outputName);
-          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-          fs.writeFileSync(outputPath, `${text}\n`, "utf-8");
-
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ outputPath }));
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${outputName}"`);
+          res.end(`${text}\n`);
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to export script" }));

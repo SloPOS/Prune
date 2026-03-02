@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@bit-cut/core";
 
-type RootName = "inbox" | "archive";
+type RootName = string;
 type BrowserEntry = {
   name: string;
   type: "dir" | "file";
@@ -9,7 +9,9 @@ type BrowserEntry = {
   sizeBytes: number | null;
 };
 
+type RootConfig = { id: string; name: string; path: string };
 type SelectedMedia = { root: RootName; path: string; name: string } | null;
+type TranscriptSource = { root: RootName; path: string } | null;
 type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
 
 type TranscribeState = {
@@ -74,6 +76,7 @@ type GapSuggestion = {
 };
 
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
+const AUDIO_EXTENSIONS = [".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg", ".opus"];
 const FIXED_SMART_CLEANUP_PHRASES = [
   "um", "uh", "ah", "er", "mm-hmm",
   "like", "basically", "actually", "literally", "seriously", "honestly", "obviously",
@@ -86,6 +89,11 @@ const FIXED_SMART_CLEANUP_PHRASES = [
 function isVideoFile(name: string) {
   const lower = name.toLowerCase();
   return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function isAudioFile(name: string) {
+  const lower = name.toLowerCase();
+  return AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 function sanitizeBaseName(name: string) {
@@ -228,26 +236,60 @@ export function App() {
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
   const [tokens, setTokens] = useState<WordToken[]>([]);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [activeMediaKind, setActiveMediaKind] = useState<"video" | "audio">("video");
   const [videoLabel, setVideoLabel] = useState<string>("No Media Loaded");
   const [selectedMedia, setSelectedMedia] = useState<SelectedMedia>(null);
+  const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>(null);
   const [exportName, setExportName] = useState<string>("edited-cut");
   const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
   const [splitLeftPct, setSplitLeftPct] = useState<number>(58);
   const [isResizing, setIsResizing] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
+  const [roots, setRoots] = useState<RootConfig[]>([]);
   const [pickerEntriesByDir, setPickerEntriesByDir] = useState<Record<string, BrowserEntry[]>>({});
   const [pickerLoadingDirs, setPickerLoadingDirs] = useState<Set<string>>(new Set());
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(["inbox:.", "archive:."]));
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<TreeSelection>(null);
   const [uploadStatus, setUploadStatus] = useState<string>("idle");
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsNeedsSetup, setSettingsNeedsSetup] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsRootsDraft, setSettingsRootsDraft] = useState<Array<{ name: string; path: string }>>([{ name: "Media", path: "" }]);
+  const [settingsUploadSubdir, setSettingsUploadSubdir] = useState("incoming/uploads");
+  const [settingsExportDir, setSettingsExportDir] = useState("");
+  const [settingsHealth, setSettingsHealth] = useState<any>(null);
+  const [showDirPicker, setShowDirPicker] = useState(false);
+  const [dirPickerPath, setDirPickerPath] = useState("/");
+  const [dirPickerParent, setDirPickerParent] = useState<string | null>(null);
+  const [dirPickerDirs, setDirPickerDirs] = useState<Array<{ name: string; path: string }>>([]);
+  const [dirPickerError, setDirPickerError] = useState<string | null>(null);
+  const [dirPickerOnPick, setDirPickerOnPick] = useState<((value: string) => void) | null>(null);
+  const [dirPickerShowHidden, setDirPickerShowHidden] = useState(false);
+  const [dirPickerNewFolderName, setDirPickerNewFolderName] = useState("");
 
   const [transcribe, setTranscribe] = useState<TranscribeState>({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
   const [exportState, setExportState] = useState<ExportState>({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
   const [scriptExport, setScriptExport] = useState<ScriptExportState>({ status: "idle", outputPath: null, error: null });
   const [subtitleExport, setSubtitleExport] = useState<SubtitleExportState>({ status: "idle", outputPath: null, error: null, format: null });
   const [scriptIncludeDeleted, setScriptIncludeDeleted] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showFilePickerModal, setShowFilePickerModal] = useState(false);
+  const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");
+  const [filePickerShowAll, setFilePickerShowAll] = useState(false);
+  const [showTranscriptPrompt, setShowTranscriptPrompt] = useState(false);
+  const [showTranscribeModal, setShowTranscribeModal] = useState(false);
+  const [filePickerFromTranscriptPrompt, setFilePickerFromTranscriptPrompt] = useState(false);
+  const [exportCapabilities, setExportCapabilities] = useState<Array<{ format: string; videoEncoder: string | null; speed: string }>>([]);
+  const [downloadedExportJobs, setDownloadedExportJobs] = useState<Set<string>>(new Set());
+  const [undoStack, setUndoStack] = useState<Set<string>[]>([]);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentProjectName, setCurrentProjectName] = useState<string>("");
+  const [showLoadProjectModal, setShowLoadProjectModal] = useState(false);
+  const [savedProjects, setSavedProjects] = useState<Array<{ projectId: string; projectName: string; root: string; path: string; updatedAt?: string }>>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [openLeftPanel, setOpenLeftPanel] = useState<"noise" | "stt" | null>(null);
   const [subtitleIncludeDeleted, setSubtitleIncludeDeleted] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
@@ -259,10 +301,22 @@ export function App() {
   const [gapMinThresholdSec, setGapMinThresholdSec] = useState(0.8);
   const [gapLeaveBehindSec, setGapLeaveBehindSec] = useState(0.12);
   const [appliedGapCuts, setAppliedGapCuts] = useState<TimeRange[]>([]);
+  const [openToolPanel, setOpenToolPanel] = useState<"smart" | "gap" | "summary" | null>(null);
+  const [dragStartIndex, setDragStartIndex] = useState<number | null>(null);
+  const [dragEndIndex, setDragEndIndex] = useState<number | null>(null);
+  const [isDraggingTokens, setIsDraggingTokens] = useState(false);
+  const [suppressNextTokenClick, setSuppressNextTokenClick] = useState(false);
+  const [detectBreaths, setDetectBreaths] = useState(true);
+  const [detectNoiseClicks, setDetectNoiseClicks] = useState(true);
+  const [analysisCandidates, setAnalysisCandidates] = useState<AnalysisCandidate[]>([]);
+  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "running" | "error">("idle");
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    void Promise.all([loadDir("inbox", "."), loadDir("archive", ".")]);
+    void loadSettingsAndRoots();
+    void loadExportCapabilities();
   }, []);
   useEffect(() => {
     if (!isResizing) return;
@@ -280,6 +334,13 @@ export function App() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    if (!isDraggingTokens) return;
+    const onUp = () => endTokenDrag();
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [isDraggingTokens, dragStartIndex, dragEndIndex]);
 
   useEffect(() => {
     if (!transcribe.jobId || (transcribe.status !== "running" && transcribe.status !== "starting")) return;
@@ -311,13 +372,18 @@ export function App() {
       if (!response.ok) return;
       const data = await response.json();
       setExportState((prev) => ({ ...prev, status: data.status === "running" || data.status === "queued" ? "running" : data.status, outputPath: data.outputPath ?? prev.outputPath, error: data.error ?? null, log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log }));
+      if (data.status === "done" && data.downloadUrl && exportState.jobId && !downloadedExportJobs.has(exportState.jobId)) {
+        window.open(data.downloadUrl, "_blank");
+        setDownloadedExportJobs((prev) => new Set(prev).add(exportState.jobId!));
+      }
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [exportState.jobId, exportState.status]);
+  }, [exportState.jobId, exportState.status, downloadedExportJobs]);
 
   useEffect(() => { setActiveTokenIndex(tokenAtTime(tokens, currentTimeSec)); }, [tokens, currentTimeSec]);
   useEffect(() => {
     if (videoRef.current) videoRef.current.currentTime = 0;
+    if (audioRef.current) audioRef.current.currentTime = 0;
     setCurrentTimeSec(0);
     setActiveTokenIndex(-1);
     setVideoDurationSec(0);
@@ -386,6 +452,128 @@ export function App() {
     return ids;
   }, [highlightedPhrase, phraseMatches, searchedTokenIds]);
 
+  const dragSelectedTokenIds = useMemo(() => {
+    if (dragStartIndex === null || dragEndIndex === null || tokens.length === 0) return new Set<string>();
+    const start = Math.min(dragStartIndex, dragEndIndex);
+    const end = Math.max(dragStartIndex, dragEndIndex);
+    const ids = new Set<string>();
+    for (let i = start; i <= end; i += 1) {
+      const tok = tokens[i];
+      if (tok) ids.add(tok.id);
+    }
+    return ids;
+  }, [dragStartIndex, dragEndIndex, tokens]);
+
+  async function loadSettingsAndRoots() {
+    const response = await fetch("/api/settings");
+    if (!response.ok) return;
+    const data = await response.json();
+    const nextRoots: RootConfig[] = Array.isArray(data.roots) ? data.roots : [];
+    setRoots(nextRoots);
+    setSettingsNeedsSetup(Boolean(data.needsSetup));
+    setShowSettings(Boolean(data.needsSetup));
+    setSettingsRootsDraft(nextRoots.length > 0 ? nextRoots.map((r) => ({ name: r.name, path: r.path })) : [{ name: "Media", path: "" }]);
+    setSettingsUploadSubdir(data.uploadSubdir ?? "incoming/uploads");
+    setSettingsExportDir(data.exportDir ?? "");
+    setExpandedDirs(new Set(nextRoots.map((r) => `${r.id}:.`)));
+    await Promise.all(nextRoots.map((r) => loadDir(r.id, ".")));
+    await loadSettingsHealth();
+  }
+
+  async function loadSettingsHealth() {
+    const response = await fetch("/api/settings/health");
+    if (!response.ok) return;
+    setSettingsHealth(await response.json());
+  }
+
+  async function loadDirPicker(pathValue: string) {
+    const query = new URLSearchParams({ path: pathValue, hidden: dirPickerShowHidden ? "1" : "0" }).toString();
+    const response = await fetch(`/api/system/dirs?${query}`);
+    if (!response.ok) {
+      if (pathValue !== "/") {
+        await loadDirPicker("/");
+        return;
+      }
+      setDirPickerError(await response.text());
+      return;
+    }
+    const data = await response.json();
+    setDirPickerPath(String(data.path ?? "/"));
+    setDirPickerParent(data.parent ?? null);
+    setDirPickerDirs(Array.isArray(data.dirs) ? data.dirs : []);
+    setDirPickerError(null);
+  }
+
+  async function browseForPath(onPick: (value: string) => void, startPath?: string) {
+    setDirPickerOnPick(() => onPick);
+    setShowDirPicker(true);
+    setDirPickerNewFolderName("");
+    await loadDirPicker(startPath && startPath.trim() ? startPath : "/");
+  }
+
+  async function createDirInPicker() {
+    const name = dirPickerNewFolderName.trim();
+    if (!name) return;
+    const response = await fetch("/api/system/mkdir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: dirPickerPath, name }),
+    });
+    if (!response.ok) {
+      setDirPickerError(await response.text());
+      return;
+    }
+    setDirPickerNewFolderName("");
+    await loadDirPicker(dirPickerPath);
+  }
+
+  useEffect(() => {
+    if (!showDirPicker) return;
+    void loadDirPicker(dirPickerPath || "/");
+  }, [dirPickerShowHidden]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  async function loadExportCapabilities() {
+    const response = await fetch("/api/export/capabilities");
+    if (!response.ok) return;
+    const data = await response.json();
+    setExportCapabilities(Array.isArray(data.options) ? data.options : []);
+  }
+
+  async function clearVideoExportCache() {
+    const response = await fetch("/api/export/cache/clear", { method: "POST" });
+    if (!response.ok) {
+      setSettingsError(await response.text());
+      return;
+    }
+    const data = await response.json();
+    setSettingsError(null);
+    setUploadStatus(`cleared video cache: ${data.removed ?? 0} files`);
+  }
+
+  async function saveSettings() {
+    setSettingsError(null);
+    const cleaned = settingsRootsDraft
+      .map((r) => ({ name: r.name.trim(), path: r.path.trim() }))
+      .filter((r) => r.name && r.path);
+    const response = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roots: cleaned, uploadSubdir: settingsUploadSubdir, exportDir: settingsExportDir || undefined }),
+    });
+    if (!response.ok) {
+      setSettingsError(await response.text());
+      return;
+    }
+    setShowSettings(false);
+    await loadSettingsAndRoots();
+  }
+
   async function loadDir(root: RootName, relDir: string) {
     const dirKey = `${root}:${relDir}`;
     setPickerLoadingDirs((prev) => new Set(prev).add(dirKey));
@@ -432,6 +620,7 @@ export function App() {
       return false;
     }
     setTokens(nextTokens);
+    setTranscriptSource({ root, path: relPath });
     setDeleted(new Set());
     setIgnoredPhrases(new Set());
     setHighlightedPhrase(null);
@@ -440,35 +629,146 @@ export function App() {
   }
 
   async function tryAutoLoadTranscript(root: RootName, fileName: string) {
-    await loadTranscript(root, `transcripts/${sanitizeBaseName(fileName)}.json`, true);
+    const loaded = await loadTranscript(root, `transcripts/${sanitizeBaseName(fileName)}.json`, true);
+    if (loaded) setShowTranscriptPrompt(false);
   }
 
-  async function openSelectedFile() {
-    if (!selectedEntry || selectedEntry.type !== "file") return;
-    const entryName = selectedEntry.relPath.split("/").filter(Boolean).at(-1) ?? selectedEntry.relPath;
+  function applyLoadedProjectData(data: any) {
+    const deletedIds = Array.isArray(data.deletedTokenIds) ? data.deletedTokenIds.map((v: unknown) => String(v)) : [];
+    const gapCuts = Array.isArray(data.appliedGapCuts) ? data.appliedGapCuts : [];
+    setDeleted(new Set(deletedIds));
+    setAppliedGapCuts(gapCuts);
+    if (typeof data.exportName === "string" && data.exportName.trim()) setExportName(data.exportName);
+    setCurrentProjectId(typeof data.projectId === "string" ? data.projectId : null);
+    setCurrentProjectName(typeof data.projectName === "string" ? data.projectName : "");
+  }
+
+  async function loadSavedProject(root: RootName, relPath: string) {
+    const query = new URLSearchParams({ root, path: relPath }).toString();
+    const response = await fetch(`/api/project/load?${query}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    applyLoadedProjectData(data);
+  }
+
+  async function refreshSavedProjects() {
+    const response = await fetch("/api/project/list");
+    if (!response.ok) return;
+    const data = await response.json();
+    setSavedProjects(Array.isArray(data.projects) ? data.projects : []);
+  }
+
+  async function deleteProjectById(projectId: string) {
+    const response = await fetch("/api/project/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    });
+    if (!response.ok) {
+      setToast(`Delete failed: ${await response.text()}`);
+      return;
+    }
+    setSavedProjects((prev) => prev.filter((p) => p.projectId !== projectId));
+    setToast("Project deleted");
+  }
+
+  async function loadProjectById(projectId: string) {
+    const query = new URLSearchParams({ projectId }).toString();
+    const response = await fetch(`/api/project/load?${query}`);
+    if (!response.ok) {
+      setToast(`Load failed: ${await response.text()}`);
+      return;
+    }
+    const data = await response.json();
+    await openFileEntry(String(data.root), String(data.path), { skipPrompt: true, skipAutoTranscript: true });
+    if (data.transcriptRoot && data.transcriptPath) {
+      await loadTranscript(String(data.transcriptRoot), String(data.transcriptPath), true);
+    }
+    applyLoadedProjectData(data);
+    setShowTranscriptPrompt(false);
+    setShowLoadProjectModal(false);
+    setToast(`Loaded project: ${data.projectName || "Project"}`);
+  }
+
+  async function saveProject() {
+    if (!selectedMedia) return;
+    const proposedName = window.prompt("Project name", currentProjectName || selectedMedia.name.replace(/\.[^.]+$/, "")) ?? "";
+    const projectName = proposedName.trim() || selectedMedia.name.replace(/\.[^.]+$/, "");
+    const response = await fetch("/api/project/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: currentProjectId,
+        projectName,
+        root: selectedMedia.root,
+        path: selectedMedia.path,
+        exportName,
+        transcriptRoot: transcriptSource?.root ?? null,
+        transcriptPath: transcriptSource?.path ?? null,
+        deletedTokenIds: Array.from(deleted),
+        appliedGapCuts,
+      }),
+    });
+    if (!response.ok) {
+      setToast(`Save failed: ${await response.text()}`);
+      return;
+    }
+    const data = await response.json();
+    setCurrentProjectId(data.projectId ?? null);
+    setCurrentProjectName(data.projectName ?? projectName);
+    setToast(`Project saved: ${data.projectName ?? projectName}`);
+  }
+
+  function clearProject() {
+    setSelectedMedia(null);
+    setVideoSrc(null);
+    setVideoLabel("No Media Loaded");
+    setTokens([]);
+    setTranscriptSource(null);
+    setDeleted(new Set());
+    setAppliedGapCuts([]);
+    setIgnoredPhrases(new Set());
+    setHighlightedPhrase(null);
+    setSearchPhrase("");
+    setUndoStack([]);
+    setCurrentProjectId(null);
+    setCurrentProjectName("");
+  }
+
+  async function openFileEntry(root: RootName, relPath: string, opts?: { skipPrompt?: boolean; skipAutoTranscript?: boolean }) {
+    const entryName = relPath.split("/").filter(Boolean).at(-1) ?? relPath;
 
     if (entryName.toLowerCase().endsWith(".json")) {
-      await loadTranscript(selectedEntry.root, selectedEntry.relPath);
+      await loadTranscript(root, relPath);
       return;
     }
 
-    if (isVideoFile(entryName)) {
-      const query = new URLSearchParams({ root: selectedEntry.root, path: selectedEntry.relPath }).toString();
+    if (isVideoFile(entryName) || isAudioFile(entryName)) {
+      const query = new URLSearchParams({ root, path: relPath }).toString();
       setVideoSrc(`/api/media?${query}`);
-      setVideoLabel(`${selectedEntry.root}: ${selectedEntry.relPath}`);
-      setSelectedMedia({ root: selectedEntry.root, path: selectedEntry.relPath, name: entryName });
+      setActiveMediaKind(isAudioFile(entryName) ? "audio" : "video");
+      setVideoLabel(`${root}: ${relPath}`);
+      setSelectedMedia({ root, path: relPath, name: entryName });
       setExportName(`${entryName.replace(/\.[^.]+$/, "")}-edited`);
       setTranscribe({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
       setExportState({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
-      await tryAutoLoadTranscript(selectedEntry.root, entryName);
+      if (!opts?.skipPrompt) setShowTranscriptPrompt(true);
+      if (!opts?.skipAutoTranscript) await tryAutoLoadTranscript(root, entryName);
+      await loadSavedProject(root, relPath);
       return;
     }
 
     alert("Selected file is not a supported media/transcript file.");
   }
 
+  async function openSelectedFile() {
+    if (!selectedEntry || selectedEntry.type !== "file") return;
+    await openFileEntry(selectedEntry.root, selectedEntry.relPath);
+  }
+
   async function startTranscription() {
     if (!selectedMedia) return;
+    setShowTranscribeModal(true);
     setTranscribe({ jobId: null, status: "starting", log: [], transcriptRelPath: null, error: null });
     const response = await fetch("/api/transcribe/start", {
       method: "POST",
@@ -542,8 +842,14 @@ export function App() {
       body: JSON.stringify({ outputName: `${exportName || "edited"}-script`, text: `${header}\n${scriptBody}\n` }),
     });
     if (!response.ok) return setScriptExport({ status: "error", outputPath: null, error: await response.text() });
-    const data = await response.json();
-    setScriptExport({ status: "done", outputPath: data.outputPath ?? null, error: null });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportName || "edited"}-script.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setScriptExport({ status: "done", outputPath: "browser download", error: null });
   }
 
   async function exportSubtitles(format: "srt" | "vtt") {
@@ -570,8 +876,14 @@ export function App() {
       return;
     }
 
-    const data = await response.json();
-    setSubtitleExport({ status: "done", outputPath: data.outputPath ?? null, error: null, format });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportName || "edited"}.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSubtitleExport({ status: "done", outputPath: "browser download", error: null, format });
   }
 
   async function copyScriptToClipboard() {
@@ -589,40 +901,66 @@ export function App() {
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
       setUploadStatus(`uploaded: ${data.savedPath ?? data.relPath}`);
-      await Promise.all([loadDir("archive", "."), loadDir("archive", "incoming/uploads")]);
-      setExpandedDirs((prev) => new Set(prev).add("archive:incoming/uploads"));
-      setSelectedEntry({ root: "archive", relPath: data.relPath, type: "file" });
+      const uploadRoot = String(data.root ?? roots[0]?.id ?? "");
+      const uploadDir = String(data.relPath ?? "").split("/").slice(0, -1).join("/") || ".";
+      if (uploadRoot) {
+        await Promise.all([loadDir(uploadRoot, "."), loadDir(uploadRoot, uploadDir)]);
+        setExpandedDirs((prev) => new Set(prev).add(`${uploadRoot}:${uploadDir}`));
+        setSelectedEntry({ root: uploadRoot, relPath: data.relPath, type: "file" });
+      }
     } catch (error) {
       setUploadStatus(`error: ${error instanceof Error ? error.message : "upload failed"}`);
     }
+  }
+
+  function applyDeletedChange(mutator: (next: Set<string>) => void) {
+    setDeleted((prev) => {
+      setUndoStack((history) => [...history.slice(-39), new Set(prev)]);
+      const next = new Set(prev);
+      mutator(next);
+      return next;
+    });
+  }
+
+  function undoLastDeleteAction() {
+    setUndoStack((history) => {
+      const previous = history[history.length - 1];
+      if (!previous) return history;
+      setDeleted(new Set(previous));
+      return history.slice(0, -1);
+    });
   }
 
   function removeSearchedMatches() {
     if (searchedTokenIds.length === 0) return;
     const unique = Array.from(new Set(searchedTokenIds));
     const allDeleted = unique.every((id) => deleted.has(id));
-    setDeleted((prev) => {
-      const next = new Set(prev);
+    applyDeletedChange((next) => {
       for (const id of unique) allDeleted ? next.delete(id) : next.add(id);
-      return next;
     });
   }
 
   function toggle(id: string) {
-    setDeleted((prev) => {
-      const next = new Set(prev);
+    applyDeletedChange((next) => {
       next.has(id) ? next.delete(id) : next.add(id);
-      return next;
     });
   }
 
+  function playFromToken(token: WordToken) {
+    const mediaEl = videoRef.current ?? audioRef.current;
+    if (!mediaEl) return;
+    const seekTarget = Math.max(0, token.startSec + 0.01);
+    mediaEl.currentTime = seekTarget;
+    setCurrentTimeSec(seekTarget);
+    setActiveTokenIndex(tokenAtTime(tokens, seekTarget));
+    void mediaEl.play();
+  }
+
   function togglePhraseDeletion(match: PhraseMatch) {
-    setDeleted((prev) => {
-      const next = new Set(prev);
+    applyDeletedChange((next) => {
       const uniqueIds = Array.from(new Set(match.tokenIds));
       const allDeleted = uniqueIds.length > 0 && uniqueIds.every((id) => next.has(id));
       for (const id of uniqueIds) allDeleted ? next.delete(id) : next.add(id);
-      return next;
     });
   }
 
@@ -636,23 +974,19 @@ export function App() {
       .filter((t) => t.startSec < candidate.endSec && t.endSec > candidate.startSec)
       .map((t) => t.id);
     if (ids.length === 0) return;
-    setDeleted((prev) => {
-      const next = new Set(prev);
+    applyDeletedChange((next) => {
       for (const id of ids) next.add(id);
-      return next;
     });
   }
 
   function applyAllCandidates() {
     if (analysisCandidates.length === 0) return;
-    setDeleted((prev) => {
-      const next = new Set(prev);
+    applyDeletedChange((next) => {
       for (const candidate of analysisCandidates) {
         for (const t of tokens) {
           if (t.startSec < candidate.endSec && t.endSec > candidate.startSec) next.add(t.id);
         }
       }
-      return next;
     });
   }
 
@@ -689,7 +1023,7 @@ export function App() {
     setAnalysisStatus("idle");
   }
 
-  function onVideoTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
+  function onVideoTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement | HTMLAudioElement>) {
     const el = event.currentTarget;
     const t = el.currentTime;
     setCurrentTimeSec(t);
@@ -713,11 +1047,45 @@ export function App() {
     setAppliedGapCuts((prev) => mergeTimeRanges([...prev, ...newCuts]));
   }
 
+  function commitDragSelection() {
+    if (dragSelectedTokenIds.size < 2) return;
+    const ids = Array.from(dragSelectedTokenIds);
+    const allDeleted = ids.every((id) => deleted.has(id));
+    applyDeletedChange((next) => {
+      for (const id of ids) allDeleted ? next.delete(id) : next.add(id);
+    });
+  }
+
+  function beginTokenDrag(index: number) {
+    setIsDraggingTokens(true);
+    setDragStartIndex(index);
+    setDragEndIndex(index);
+  }
+
+  function continueTokenDrag(index: number) {
+    if (!isDraggingTokens) return;
+    setDragEndIndex(index);
+  }
+
+  function endTokenDrag() {
+    if (!isDraggingTokens) return;
+    const hadRange = dragSelectedTokenIds.size >= 2;
+    commitDragSelection();
+    if (hadRange) setSuppressNextTokenClick(true);
+    setIsDraggingTokens(false);
+    setDragStartIndex(null);
+    setDragEndIndex(null);
+  }
+
   function renderTree(root: RootName, relDir: string, depth = 0): React.ReactNode {
     const key = `${root}:${relDir}`;
     const entries = pickerEntriesByDir[key] ?? [];
     const dirs = entries.filter((e) => e.type === "dir");
-    const files = entries.filter((e) => e.type === "file");
+    const files = entries.filter((e) => e.type === "file").filter((e) => {
+      if (filePickerShowAll) return true;
+      if (filePickerIntent === "json") return e.name.toLowerCase().endsWith(".json");
+      return isVideoFile(e.name) || isAudioFile(e.name);
+    });
     const loading = pickerLoadingDirs.has(key);
 
     return (
@@ -736,7 +1104,23 @@ export function App() {
         })}
         {files.map((entry) => (
           <li key={`${root}:${entry.relPath}`}>
-            <button className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`} onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}>
+            <button
+              className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`}
+              onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}
+              onDoubleClick={() => {
+                setSelectedEntry({ root, relPath: entry.relPath, type: "file" });
+                if (filePickerIntent === "json") {
+                  if (!entry.relPath.toLowerCase().endsWith(".json") && !filePickerShowAll) return;
+                  void loadTranscript(root, entry.relPath);
+                  setShowFilePickerModal(false);
+                  setFilePickerFromTranscriptPrompt(false);
+                  setShowTranscriptPrompt(false);
+                  return;
+                }
+                void openFileEntry(root, entry.relPath);
+                setShowFilePickerModal(false);
+              }}
+            >
               📄 {entry.name}
             </button>
           </li>
@@ -747,101 +1131,85 @@ export function App() {
   }
 
   return (
+    <>
     <div className="page split" ref={splitRef} style={{ gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
       <div className="pane videoPane">
         <h2>Video</h2>
         <div className="hint">Selected: {videoLabel}</div>
-        {videoSrc ? <video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} /> : <div className="videoPlaceholder">No Media Loaded</div>}
+        {videoSrc ? (
+          activeMediaKind === "video"
+            ? <video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} />
+            : <audio ref={audioRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} style={{ width: "100%", marginBottom: 10 }} />
+        ) : <button className="videoPlaceholder" title="Click to browse media files" onClick={() => { setFilePickerIntent("media"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); }}>No Media Loaded — click here to select a file</button>}
+        <div className="row">
+          <button title="Browse media files" onClick={() => { setFilePickerIntent("media"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); }}>Browse</button>
+        </div>
 
         <label className="toggleRow"><input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />Preview Cuts (skip deleted sections during playback)</label>
 
-        <h3>Suggest-only Detection (v1)</h3>
-        <label className="toggleRow"><input type="checkbox" checked={detectBreaths} onChange={(e) => setDetectBreaths(e.target.checked)} />Detect breaths</label>
-        <label className="toggleRow"><input type="checkbox" checked={detectNoiseClicks} onChange={(e) => setDetectNoiseClicks(e.target.checked)} />Detect transient noise clicks</label>
-        <div className="row">
-          <button onClick={() => void runDetectionAnalysis()} disabled={!selectedMedia || tokens.length === 0 || analysisStatus === "running" || (!detectBreaths && !detectNoiseClicks)}>{analysisStatus === "running" ? "Analyzing…" : "Run detection"}</button>
-          <button onClick={() => applyAllCandidates()} disabled={analysisCandidates.length === 0}>Apply all as cuts</button>
-        </div>
-        {analysisError && <div className="error">{analysisError}</div>}
-        <div className="hint">Conservative heuristics to reduce false positives. Suggestions are optional.</div>
-        {analysisCandidates.length > 0 && (
-          <div className="suggestionsPanel">
-            {analysisCandidates.map((candidate) => (
-              <div key={candidate.id} className="suggestionItem">
-                <div><strong>{candidate.kind === "breath" ? "Breath" : "Noise click"}</strong> · {candidate.startSec.toFixed(2)}s–{candidate.endSec.toFixed(2)}s · {candidate.confidence}</div>
-                <div className="hint">{candidate.reason}</div>
-                <button onClick={() => applyCandidate(candidate)}>Mark as cut</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <h3>Speech-to-text</h3>
-        <div className="hint">Select a local video, then click Start Whisper STT.</div>
-        <div className="row">
-          <button onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : "Start Whisper STT"}</button>
-          <button onClick={() => void loadLatestTranscript()} disabled={!selectedMedia}>Load latest transcript</button>
-        </div>
-        <div className="hint">Status: {transcribe.status}{transcribe.phase ? ` (${transcribe.phase})` : ""}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
-        {(transcribe.status === "running" || transcribe.status === "done") && <><progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} /><div className="hint">{transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s{transcribe.status === "running" && ` · ${transcribeProgress.speed.toFixed(2)}x realtime · ETA ${formatEta(transcribeProgress.remaining)}`}</div></>}
-        {transcribe.transcriptRelPath && <div className="hint">Output: {transcribe.transcriptRelPath}</div>}
-
-        <h3>Export</h3>
-        <div className="row">
-          <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} />
-          <button onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>{exportState.status === "running" || exportState.status === "starting" ? "Exporting…" : "Export Edited Video"}</button>
-          <button onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
-        </div>
-        <div className="hint">Status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
-        {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
-
-        <h3>Script Export</h3>
-        <label className="toggleRow"><input type="checkbox" checked={scriptIncludeDeleted} onChange={(e) => setScriptIncludeDeleted(e.target.checked)} />Include deleted tokens</label>
-        <div className="row">
-          <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>{scriptExport.status === "working" ? "Exporting Script…" : "Export Script (.txt)"}</button>
-          <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
-        </div>
-        <div className="hint">Status: {scriptExport.status}{scriptExport.error ? ` — ${scriptExport.error}` : ""}</div>
-        {scriptExport.outputPath && <div className="hint">Output path: {scriptExport.outputPath}</div>}
-
-        <h3>Subtitle Export</h3>
-        <label className="toggleRow"><input type="checkbox" checked={subtitleIncludeDeleted} onChange={(e) => setSubtitleIncludeDeleted(e.target.checked)} />Include deleted tokens</label>
-        <div className="row">
-          <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>{subtitleExport.status === "working" && subtitleExport.format === "srt" ? "Exporting .srt…" : "Export .srt"}</button>
-          <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>{subtitleExport.status === "working" && subtitleExport.format === "vtt" ? "Exporting .vtt…" : "Export .vtt"}</button>
-        </div>
-        <div className="hint">Status: {subtitleExport.status}{subtitleExport.format ? ` (${subtitleExport.format.toUpperCase()})` : ""}{subtitleExport.error ? ` — ${subtitleExport.error}` : ""}</div>
-        {subtitleExport.outputPath && <div className="hint">Output path: {subtitleExport.outputPath}</div>}
-
-        <h3>Local file picker</h3>
-        <div className="pickerPanel">
+        <details className="collapsedPanel" open={openLeftPanel === "noise"}>
+          <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "noise" ? null : "noise")); }}>
+            <strong>Suggest-only Detection (v1)</strong>
+            <span className="hint">Candidates: {analysisCandidates.length}</span>
+          </summary>
+          <label className="toggleRow"><input type="checkbox" checked={detectBreaths} onChange={(e) => setDetectBreaths(e.target.checked)} />Detect breaths</label>
+          <label className="toggleRow"><input type="checkbox" checked={detectNoiseClicks} onChange={(e) => setDetectNoiseClicks(e.target.checked)} />Detect transient noise clicks</label>
           <div className="row">
-            <button onClick={() => void Promise.all([loadDir("inbox", "."), loadDir("archive", ".")])}>Refresh roots</button>
-            <button onClick={() => void openSelectedFile()} disabled={!selectedEntry || selectedEntry.type !== "file"}>Open selected file</button>
+            <button onClick={() => void runDetectionAnalysis()} disabled={!selectedMedia || tokens.length === 0 || analysisStatus === "running" || (!detectBreaths && !detectNoiseClicks)}>{analysisStatus === "running" ? "Analyzing…" : "Run detection"}</button>
+            <button onClick={() => applyAllCandidates()} disabled={analysisCandidates.length === 0}>Apply all as cuts</button>
           </div>
-          <div className="path">Selected: {selectedEntry ? `${selectedEntry.root}:/${selectedEntry.relPath === "." ? "" : selectedEntry.relPath}` : "none"}</div>
-          <div className="treeRootWrap">
-            <div className="treeRootHeader">📦 inbox</div>
-            {renderTree("inbox", ".")}
-            <div className="treeRootHeader">🗄️ archive</div>
-            {renderTree("archive", ".")}
-          </div>
+          {analysisError && <div className="error">{analysisError}</div>}
+          <div className="hint">Conservative heuristics to reduce false positives. Suggestions are optional.</div>
+          {analysisCandidates.length > 0 && (
+            <div className="suggestionsPanel">
+              {analysisCandidates.map((candidate) => (
+                <div key={candidate.id} className="suggestionItem">
+                  <div><strong>{candidate.kind === "breath" ? "Breath" : "Noise click"}</strong> · {candidate.startSec.toFixed(2)}s–{candidate.endSec.toFixed(2)}s · {candidate.confidence}</div>
+                  <div className="hint">{candidate.reason}</div>
+                  <button onClick={() => applyCandidate(candidate)}>Mark as cut</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </details>
+
+        <details className="collapsedPanel" open={openLeftPanel === "stt"}>
+          <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "stt" ? null : "stt")); }}>
+            <strong>Speech-to-text</strong>
+            <span className="hint">Status: {transcribe.status}</span>
+          </summary>
+          <div className="hint">Select a local video/audio file, then click Start Whisper STT.</div>
           <div className="row">
-            <label>Upload media/transcript to archive:/incoming/uploads:&nbsp;
-              <input type="file" accept="video/*,.json,.txt,.vtt,.srt" onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
-            </label>
+            <button onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : "Start Whisper STT"}</button>
+            <button onClick={() => void loadLatestTranscript()} disabled={!selectedMedia}>Load latest transcript</button>
           </div>
-          {pickerError && <div className="error">{pickerError}</div>}
-          {uploadStatus !== "idle" && <div className="hint">Upload: {uploadStatus}</div>}
-          <div className="hint">Unified explorer spans inbox + archive. Uploads are always stored in /mnt/video-archive/incoming/uploads.</div>
+          <div className="hint">Status: {transcribe.status}{transcribe.phase ? ` (${transcribe.phase})` : ""}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
+          {(transcribe.status === "running" || transcribe.status === "done") && <><progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} /><div className="hint">{transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s{transcribe.status === "running" && ` · ${transcribeProgress.speed.toFixed(2)}x realtime · ETA ${formatEta(transcribeProgress.remaining)}`}</div></>}
+          {transcribe.transcriptRelPath && <div className="hint">Output: {transcribe.transcriptRelPath}</div>}
+          {(transcribe.status === "running" || transcribe.status === "starting") && !showTranscribeModal && (
+            <div className="hint" title="Whisper is still running in background">Whisper running in background… {transcribeProgress.pct.toFixed(1)}%</div>
+          )}
+        </details>
+
+        <div className="exportButtonWrap">
+          <div className="row" style={{ marginBottom: 0 }}>
+            <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
+            <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
+            <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
+            <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
+          </div>
+          <button className="exportBigButton" title="Review final cut preview and export options" onClick={() => setShowExportModal(true)}>Export</button>
         </div>
       </div>
 
       <div className={`splitHandle ${isResizing ? "active" : ""}`} onMouseDown={() => setIsResizing(true)} role="separator" aria-orientation="vertical" />
 
       <div className="pane transcriptPane">
-        <h2>Transcript</h2>
-        <div className="hint">Click words in-line to mark/remove cuts.</div>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0 }}>Transcript</h2>
+          <button title="Undo last transcript removal action" onClick={() => undoLastDeleteAction()} disabled={undoStack.length === 0}>Undo</button>
+        </div>
+        <div className="hint">Click words to mark/remove cuts. Click-drag across words to toggle a whole span. Double-click a word to jump and resume playback from that point.</div>
         <div className="hint">Playback: {currentTimeSec.toFixed(2)}s</div>
         <div className={`timingBadge ${timingMatch ? "ok" : "warn"}`}>
           {timingValid ? (timingMatch ? `Timing match ✓ (video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)` : `Timing warning ⚠ (Δ ${timingDiffSec.toFixed(2)}s · video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`) : "Timing check pending: load video + transcript"}
@@ -854,9 +1222,75 @@ export function App() {
           <button onClick={() => removeSearchedMatches()} disabled={searchedTokenIds.length === 0}>Toggle remove matches</button>
         </div>
 
-        <div className="summaryCleanupRow">
-          <div>
-            <h3>Cut/keep summary</h3>
+        <p className="transcriptParagraph">
+          {tokens.map((t, index) => {
+            const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
+            return <span key={t.id}><button onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
+          })}
+        </p>
+
+        <div className="toolsStack">
+          <details className="collapsedPanel" open={openToolPanel === "smart"}>
+            <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "smart" ? null : "smart")); }}>
+              <strong>Smart Cleanup</strong>
+              <span className="hint">Phrases found: {visiblePhraseMatches.length}</span>
+            </summary>
+            <aside className="cleanupPanel">
+              <div className="hint">Fixed filler words & phrases matched from transcript.</div>
+              {visiblePhraseMatches.length === 0 ? <div className="hint">No cleanup phrases found.</div> : (
+                <ul className="cleanupList">
+                  {visiblePhraseMatches.map((match) => {
+                    const uniqueIds = Array.from(new Set(match.tokenIds));
+                    const allDeleted = uniqueIds.length > 0 && uniqueIds.every((id) => deleted.has(id));
+                    const isHighlighted = highlightedPhrase === match.normalizedPhrase;
+                    return (
+                      <li key={match.normalizedPhrase} className="cleanupItem">
+                        <div className="cleanupTitle"><span>“{match.phrase}”</span><span className="count">×{match.count}</span></div>
+                        <div className="cleanupActions">
+                          <button onClick={() => setHighlightedPhrase((prev) => (prev === match.normalizedPhrase ? null : match.normalizedPhrase))}>{isHighlighted ? "Clear highlight" : "Highlight matches"}</button>
+                          <button onClick={() => togglePhraseDeletion(match)}>{allDeleted ? "Restore all matches" : "Remove all matches"}</button>
+                          <button onClick={() => ignorePhrase(match)}>Ignore phrase</button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </aside>
+          </details>
+
+          <details className="collapsedPanel" open={openToolPanel === "gap"}>
+            <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "gap" ? null : "gap")); }}>
+              <strong>Word-gap shortener</strong>
+              <span className="hint">Suggestions {gapSuggestions.length} · Applied trims {appliedGapCuts.length}</span>
+            </summary>
+            <aside className="cleanupPanel">
+              <label className="toggleRow"><input type="checkbox" checked={gapShortenerEnabled} onChange={(e) => setGapShortenerEnabled(e.target.checked)} />Enable applied gap trims in cut plan</label>
+              <div className="row">
+                <label className="hint">Min gap (sec)<br /><input type="number" min={0} step={0.05} value={gapMinThresholdSec} onChange={(e) => setGapMinThresholdSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
+                <label className="hint">Leave behind (sec)<br /><input type="number" min={0} step={0.05} value={gapLeaveBehindSec} onChange={(e) => setGapLeaveBehindSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
+              </div>
+              <div className="hint">Preview suggestions: {gapSuggestions.length}</div>
+              <div className="row">
+                <button onClick={applyGapSuggestions} disabled={gapSuggestions.length === 0}>Apply suggested gap trims</button>
+                <button onClick={() => setAppliedGapCuts([])} disabled={appliedGapCuts.length === 0}>Clear applied gap trims</button>
+              </div>
+              <ul className="cleanupList">
+                {gapSuggestions.length === 0 ? <li className="hint">No gaps above threshold.</li> : gapSuggestions.slice(0, 100).map((gap) => (
+                  <li key={gap.id} className="cleanupItem">
+                    <div className="cleanupTitle"><span>{gap.startSec.toFixed(2)}s → {gap.endSec.toFixed(2)}s</span><span className="count">gap {gap.gapSec.toFixed(2)}s</span></div>
+                    <div className="hint">Trim: {gap.trimStartSec.toFixed(2)}s → {gap.trimEndSec.toFixed(2)}s ({gap.trimSec.toFixed(2)}s)</div>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          </details>
+
+          <details className="collapsedPanel" open={openToolPanel === "summary"}>
+            <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "summary" ? null : "summary")); }}>
+              <strong>Cut/keep summary</strong>
+              <span className="hint">Tokens {tokens.length} · Deleted {deleted.size} · Cuts {cuts.length} ({totalCutSec.toFixed(2)}s) · Keeps {keeps.length} ({totalKeepSec.toFixed(2)}s)</span>
+            </summary>
             <ul>
               <li>Tokens: {tokens.length}</li>
               <li>Deleted tokens: {deleted.size}</li>
@@ -871,59 +1305,232 @@ export function App() {
               <h4>Computed keep ranges</h4>
               <pre>{JSON.stringify(keeps, null, 2)}</pre>
             </details>
+          </details>
+        </div>
+
+      </div>
+    </div>
+    {showFilePickerModal && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>{filePickerIntent === "json" ? "Select transcript JSON" : "Select media/transcript file"}</h3>
+            <button title="Close" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>✕</button>
           </div>
-          <aside className="cleanupPanel">
-            <h3>Smart Cleanup</h3>
-            <div className="hint">Fixed filler words & phrases matched from transcript.</div>
-            {visiblePhraseMatches.length === 0 ? <div className="hint">No cleanup phrases found.</div> : (
-              <ul className="cleanupList">
-                {visiblePhraseMatches.map((match) => {
-                  const uniqueIds = Array.from(new Set(match.tokenIds));
-                  const allDeleted = uniqueIds.length > 0 && uniqueIds.every((id) => deleted.has(id));
-                  const isHighlighted = highlightedPhrase === match.normalizedPhrase;
-                  return (
-                    <li key={match.normalizedPhrase} className="cleanupItem">
-                      <div className="cleanupTitle"><span>“{match.phrase}”</span><span className="count">×{match.count}</span></div>
-                      <div className="cleanupActions">
-                        <button onClick={() => setHighlightedPhrase((prev) => (prev === match.normalizedPhrase ? null : match.normalizedPhrase))}>{isHighlighted ? "Clear highlight" : "Highlight matches"}</button>
-                        <button onClick={() => togglePhraseDeletion(match)}>{allDeleted ? "Restore all matches" : "Remove all matches"}</button>
-                        <button onClick={() => ignorePhrase(match)}>Ignore phrase</button>
-                      </div>
-                    </li>
-                  );
-                })}
+          <div className="row">
+            {filePickerFromTranscriptPrompt && <button onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); setShowTranscriptPrompt(true); }}>Back</button>}
+            <button onClick={() => void Promise.all(roots.map((r) => loadDir(r.id, ".")))} title="Refresh all configured roots">Refresh roots</button>
+            <button onClick={() => { setShowSettings(true); void loadSettingsHealth(); }} title="Configure storage roots">Settings</button>
+            <button
+              onClick={() => {
+                if (!selectedEntry || selectedEntry.type !== "file") return;
+                if (filePickerIntent === "json") {
+                  if (!selectedEntry.relPath.toLowerCase().endsWith(".json") && !filePickerShowAll) return;
+                  void loadTranscript(selectedEntry.root, selectedEntry.relPath);
+                  setShowFilePickerModal(false);
+                  setFilePickerFromTranscriptPrompt(false);
+                  setShowTranscriptPrompt(false);
+                  return;
+                }
+                void openSelectedFile();
+                setShowFilePickerModal(false);
+              }}
+              disabled={!selectedEntry || selectedEntry.type !== "file"}
+              title={filePickerIntent === "json" ? "Load selected JSON transcript" : "Open selected media/transcript file"}
+            >Open selected file</button>
+            <label className="toggleRow" style={{ margin: 0 }} title="Show all files, not only expected type"><input type="checkbox" checked={filePickerShowAll} onChange={(e) => setFilePickerShowAll(e.target.checked)} />Show all files</label>
+            <button onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>Close</button>
+          </div>
+          <div className="path">Selected: {selectedEntry ? `${selectedEntry.root}:/${selectedEntry.relPath === "." ? "" : selectedEntry.relPath}` : "none"}</div>
+          <div className="treeRootWrap" style={{ maxHeight: 420 }}>
+            {roots.length === 0 ? <div className="hint">No media roots configured. Open Settings.</div> : roots.map((root) => (
+              <div key={root.id}>
+                <div className="treeRootHeader">📁 {root.name}</div>
+                {renderTree(root.id, ".")}
+              </div>
+            ))}
+          </div>
+          <div className="row">
+            <label title="Upload media/transcript into configured upload location">Upload media/transcript:&nbsp;
+              <input type="file" accept="video/*,audio/*,.json,.txt,.vtt,.srt" onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
+            </label>
+          </div>
+          {pickerError && <div className="error">{pickerError}</div>}
+          {uploadStatus !== "idle" && <div className="hint">Upload: {uploadStatus}</div>}
+        </div>
+      </div>
+    )}
+
+    {showTranscriptPrompt && selectedMedia && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Transcript setup</h3>
+            <button title="Close" onClick={() => setShowTranscriptPrompt(false)}>✕</button>
+          </div>
+          <div className="hint">Choose how you want to attach a transcript for {selectedMedia.name}.</div>
+          <div className="row">
+            <button title="Run Whisper transcription on selected media" onClick={() => { void startTranscription(); setShowTranscriptPrompt(false); }}>Run Whisper</button>
+            <button title="Pick an existing JSON transcript file" onClick={() => { setFilePickerIntent("json"); setFilePickerShowAll(false); setFilePickerFromTranscriptPrompt(true); setShowTranscriptPrompt(false); setShowFilePickerModal(true); }}>Use JSON transcript…</button>
+            <button onClick={() => setShowTranscriptPrompt(false)}>Skip for now</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showTranscribeModal && (transcribe.status === "running" || transcribe.status === "starting") && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Whisper transcription in progress</h3>
+            <button title="Close" onClick={() => setShowTranscribeModal(false)}>✕</button>
+          </div>
+          <progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} />
+          <div className="hint">{transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s</div>
+          <div className="row">
+            <button onClick={() => setShowTranscribeModal(false)}>Hide (keep running)</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showExportModal && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Export</h3>
+            <button title="Close" onClick={() => setShowExportModal(false)}>✕</button>
+          </div>
+          <div className="hint">Final review and export options.</div>
+          {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
+          <div className="row">
+            <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
+            <button title="Render cut media file" onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Edited Video/Audio</button>
+            <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
+          </div>
+          <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
+          <div className="row">
+            <button disabled title="Coming soon">Export Adobe Premiere XML (coming soon)</button>
+            <button disabled title="Coming soon">Export After Effects markers (coming soon)</button>
+            <button disabled title="Coming soon">Export AAF/EDL (coming soon)</button>
+          </div>
+          <h4>Subtitles & Script</h4>
+          <div className="row">
+            <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
+            <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
+            <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
+            <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+          </div>
+          <div className="hint">Export status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
+          {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
+          <div className="row">
+            <button onClick={() => setShowExportModal(false)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showLoadProjectModal && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Load project</h3>
+            <button title="Close" onClick={() => setShowLoadProjectModal(false)}>✕</button>
+          </div>
+          <div className="row">
+            <button onClick={() => void refreshSavedProjects()}>Refresh list</button>
+          </div>
+          <div className="treeRootWrap" style={{ maxHeight: 420 }}>
+            {savedProjects.length === 0 ? <div className="hint">No saved projects yet.</div> : (
+              <ul className="treeList">
+                {savedProjects.map((p) => (
+                  <li key={p.projectId} className="cleanupItem" style={{ marginBottom: 8 }}>
+                    <div className="cleanupTitle"><span>{p.projectName || "Project"}</span><span className="count">{p.updatedAt ? new Date(p.updatedAt).toLocaleString() : ""}</span></div>
+                    <div className="hint">{p.root}:/{p.path}</div>
+                    <div className="row" style={{ marginBottom: 0 }}>
+                      <button onClick={() => void loadProjectById(p.projectId)}>Load</button>
+                      <button title="Delete saved project" onClick={() => void deleteProjectById(p.projectId)}>🗑 Delete</button>
+                    </div>
+                  </li>
+                ))}
               </ul>
             )}
+          </div>
+        </div>
+      </div>
+    )}
 
-            <h3 style={{ marginTop: 12 }}>Word-gap shortener</h3>
-            <label className="toggleRow"><input type="checkbox" checked={gapShortenerEnabled} onChange={(e) => setGapShortenerEnabled(e.target.checked)} />Enable applied gap trims in cut plan</label>
-            <div className="row">
-              <label className="hint">Min gap (sec)<br /><input type="number" min={0} step={0.05} value={gapMinThresholdSec} onChange={(e) => setGapMinThresholdSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
-              <label className="hint">Leave behind (sec)<br /><input type="number" min={0} step={0.05} value={gapLeaveBehindSec} onChange={(e) => setGapLeaveBehindSec(Math.max(0, Number(e.target.value) || 0))} style={{ width: 120 }} /></label>
+    {toast && <div className="toastNotice">{toast}</div>}
+
+    {showSettings && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
+            {!settingsNeedsSetup && <button title="Close" onClick={() => setShowSettings(false)}>✕</button>}
+          </div>
+          <div className="hint">Configure media roots and output folders.</div>
+          {settingsRootsDraft.map((root, index) => {
+            const health = settingsHealth?.roots?.[index];
+            return (
+            <div key={`root-${index}`} className="row">
+              <input placeholder="Root name" value={root.name} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, name: e.target.value } : r))} />
+              <input placeholder="Absolute folder path" style={{ minWidth: 320, flex: 1 }} value={root.path} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: e.target.value } : r))} />
+              <button onClick={() => void browseForPath((value) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: value } : r)), root.path)}>Browse…</button>
+              <button onClick={() => setSettingsRootsDraft((prev) => prev.filter((_, i) => i !== index))} disabled={settingsRootsDraft.length <= 1}>Remove</button>
+              {health && <span className={`healthBadge ${health.readable && health.writable ? "ok" : "warn"}`}>{health.exists ? (health.readable && health.writable ? "RW OK" : health.readable ? "Read-only" : "No access") : "Missing"}</span>}
             </div>
-            <div className="hint">Preview suggestions: {gapSuggestions.length}</div>
-            <div className="row">
-              <button onClick={applyGapSuggestions} disabled={gapSuggestions.length === 0}>Apply suggested gap trims</button>
-              <button onClick={() => setAppliedGapCuts([])} disabled={appliedGapCuts.length === 0}>Clear applied gap trims</button>
-            </div>
-            <ul className="cleanupList" style={{ maxHeight: 180 }}>
-              {gapSuggestions.length === 0 ? <li className="hint">No gaps above threshold.</li> : gapSuggestions.slice(0, 100).map((gap) => (
-                <li key={gap.id} className="cleanupItem">
-                  <div className="cleanupTitle"><span>{gap.startSec.toFixed(2)}s → {gap.endSec.toFixed(2)}s</span><span className="count">gap {gap.gapSec.toFixed(2)}s</span></div>
-                  <div className="hint">Trim: {gap.trimStartSec.toFixed(2)}s → {gap.trimEndSec.toFixed(2)}s ({gap.trimSec.toFixed(2)}s)</div>
+          );})}
+          <div className="row">
+            <button onClick={() => setSettingsRootsDraft((prev) => [...prev, { name: `Media ${prev.length + 1}`, path: "" }])}>Add root</button>
+          </div>
+          <div className="row">
+            <label className="hint">Upload subfolder (inside first root)<br /><input value={settingsUploadSubdir} onChange={(e) => setSettingsUploadSubdir(e.target.value)} style={{ minWidth: 280 }} /></label>
+            <label className="hint">Export folder (optional absolute path)<br /><input value={settingsExportDir} onChange={(e) => setSettingsExportDir(e.target.value)} style={{ minWidth: 320 }} placeholder="/path/to/exports" /></label>
+            <button onClick={() => void browseForPath((value) => setSettingsExportDir(value), settingsExportDir)}>Browse export…</button>
+            {settingsHealth?.export && <span className={`healthBadge ${settingsHealth.export.readable && settingsHealth.export.writable ? "ok" : "warn"}`}>{settingsHealth.export.exists ? (settingsHealth.export.readable && settingsHealth.export.writable ? "Export RW OK" : "Export access issue") : "Export missing"}</span>}
+          </div>
+          {settingsHealth?.upload && <div className="hint">Upload target: {settingsHealth.upload.path} — {settingsHealth.upload.exists ? (settingsHealth.upload.readable && settingsHealth.upload.writable ? "RW OK" : "access issue") : "will be created on upload"}</div>}
+          {settingsError && <div className="error">{settingsError}</div>}
+          <div className="row">
+            <button title="Delete cached rendered video files from export directory" onClick={() => void clearVideoExportCache()}>Clear video export cache</button>
+            {!settingsNeedsSetup && <button onClick={() => setShowSettings(false)}>Cancel</button>}
+            <button onClick={() => void saveSettings()}>Save settings</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {showDirPicker && (
+      <div className="settingsOverlay">
+        <div className="settingsModal">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Select folder</h3>
+            <button title="Close" onClick={() => setShowDirPicker(false)}>✕</button>
+          </div>
+          <div className="hint">Current: {dirPickerPath}</div>
+          <div className="row">
+            <button onClick={() => { if (dirPickerParent) void loadDirPicker(dirPickerParent); }} disabled={!dirPickerParent}>Up</button>
+            <button onClick={() => { dirPickerOnPick?.(dirPickerPath); setShowDirPicker(false); }}>Use this folder</button>
+            <button onClick={() => setShowDirPicker(false)}>Cancel</button>
+            <label className="toggleRow" style={{ margin: 0 }}><input type="checkbox" checked={dirPickerShowHidden} onChange={(e) => setDirPickerShowHidden(e.target.checked)} />Show hidden folders</label>
+          </div>
+          <div className="row">
+            <input placeholder="New folder name" value={dirPickerNewFolderName} onChange={(e) => setDirPickerNewFolderName(e.target.value)} />
+            <button onClick={() => void createDirInPicker()} disabled={!dirPickerNewFolderName.trim()}>Create folder</button>
+          </div>
+          {dirPickerError && <div className="error">{dirPickerError}</div>}
+          <div className="treeRootWrap" style={{ maxHeight: 420 }}>
+            <ul className="treeList">
+              {dirPickerDirs.map((dir) => (
+                <li key={dir.path}>
+                  <button className="treeNode" onClick={() => void loadDirPicker(dir.path)}>📁 {dir.name}</button>
                 </li>
               ))}
             </ul>
-          </aside>
+          </div>
         </div>
-
-        <p className="transcriptParagraph">
-          {tokens.map((t, index) => {
-            const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : ""].filter(Boolean).join(" ");
-            return <span key={t.id}><button onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>{t.text}</button>{" "}</span>;
-          })}
-        </p>
       </div>
-    </div>
+    )}
+    </>
   );
 }

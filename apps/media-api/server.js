@@ -4,9 +4,10 @@ const path = require('node:path');
 
 const PORT = Number(process.env.PORT || 3199);
 
+const REPO_ROOT = path.resolve(__dirname, '../..');
 const ALLOWED_ROOTS = {
-  inbox: '/home/bit/.openclaw/workspace/inbox',
-  archive: '/mnt/video-archive',
+  inbox: path.resolve(process.env.BITCUT_INBOX_ROOT || path.join(REPO_ROOT, 'inbox')),
+  archive: path.resolve(process.env.BITCUT_ARCHIVE_ROOT || path.join(REPO_ROOT, 'data', 'archive')),
 };
 
 const MEDIA_EXTENSIONS = new Set([

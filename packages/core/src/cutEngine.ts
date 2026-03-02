@@ -21,13 +21,33 @@ export function cutRangesFromDeletedTokens(
   deletedTokenIds: Set<string>,
   padSec = 0.08,
 ): TimeRange[] {
-  const raw = tokens
-    .filter((t) => deletedTokenIds.has(t.id))
-    .map((t) => ({
-      startSec: Math.max(0, t.startSec - padSec),
-      endSec: t.endSec + padSec,
-    }))
-    .sort((a, b) => a.startSec - b.startSec);
+  const raw: TimeRange[] = [];
+
+  let runStart: WordToken | null = null;
+  let runEnd: WordToken | null = null;
+  let runLength = 0;
+
+  const flushRun = () => {
+    if (!runStart || !runEnd || runLength <= 0) return;
+    raw.push({
+      startSec: Math.max(0, runStart.startSec - padSec),
+      endSec: runEnd.endSec + padSec,
+    });
+    runStart = null;
+    runEnd = null;
+    runLength = 0;
+  };
+
+  for (const token of tokens) {
+    if (deletedTokenIds.has(token.id)) {
+      if (!runStart) runStart = token;
+      runEnd = token;
+      runLength += 1;
+    } else {
+      flushRun();
+    }
+  }
+  flushRun();
 
   if (raw.length === 0) return [];
 

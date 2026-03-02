@@ -30,6 +30,11 @@ Edit spoken-video content by editing text:
 
 ## Run the prototype
 
+Prerequisites:
+- Node.js 20+
+- ffmpeg + ffprobe in PATH
+- Python 3.10+ (for Whisper)
+
 ```bash
 npm install
 npm run dev -w @bit-cut/editor-web
@@ -87,6 +92,12 @@ Supported env overrides:
 - `AUDIO_DIR` (default `data/audio`)
 - `TRANSCRIPTS_DIR` (default `data/transcripts`)
 
+App filesystem env overrides (`.env`):
+- `BITCUT_INBOX_ROOT` (default `<repo>/inbox`)
+- `BITCUT_ARCHIVE_ROOT` (default `<repo>/data/archive`)
+- `BITCUT_UPLOAD_SUBDIR` (default `incoming/uploads`, under archive root)
+- `BITCUT_EXPORT_DIR` (default `<archive>/exports`)
+
 ## Media file API (safe listing)
 
 Run:
@@ -105,9 +116,10 @@ Routes:
 - `GET /api/export/status?jobId=<uuid>`
 
 Behavior:
-- only two hardcoded roots are allowed:
-  - `/home/bit/.openclaw/workspace/inbox`
-  - `/mnt/video-archive`
+- only two configured roots are allowed (`inbox` and `archive`)
+- defaults (if env vars are not set):
+  - `inbox` => `<repo>/inbox`
+  - `archive` => `<repo>/data/archive`
 - path traversal is blocked by resolving + validating relative paths
 - hidden files/dirs are skipped
 - media extension allowlist is enforced
@@ -123,7 +135,7 @@ Export API request body (`POST /api/export/start`):
 - `cuts`: optional fallback; keep ranges are computed if `keepRanges` is missing
 
 Export behavior:
-- output directory prefers `/mnt/video-archive/exports`
+- output directory prefers `BITCUT_EXPORT_DIR` (or `<archive>/exports` by default)
 - if that is unavailable, falls back to `data/exports/`
 - encoder prefers `h264_qsv` when available and auto-retries with `libx264` on failure
 - poll `GET /api/export/status?jobId=...` for status/logs/output path

@@ -39,7 +39,32 @@ type ExportState = {
   log: string[];
 };
 
+type ScriptExportState = {
+  status: "idle" | "working" | "done" | "error";
+  outputPath: string | null;
+  error: string | null;
+};
+
+type PhraseMatch = {
+  phrase: string;
+  normalizedPhrase: string;
+  tokenIds: string[];
+  count: number;
+};
+
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
+const DEFAULT_SMART_CLEANUP_PHRASES = [
+  "um",
+  "uh",
+  "like",
+  "you know",
+  "i mean",
+  "so",
+  "we're going to",
+  "basically",
+  "actually",
+  "literally",
+] as const;
 
 function isVideoFile(name: string) {
   const lower = name.toLowerCase();
@@ -48,6 +73,76 @@ function isVideoFile(name: string) {
 
 function sanitizeBaseName(name: string) {
   return name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function normalizeText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
+}
+
+function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
+  if (tokens.length === 0) return [];
+
+  const normalizedTokens = tokens.map((token) => ({ token, normalized: normalizeText(token.text) })).filter((t) => t.normalized.length > 0);
+  if (normalizedTokens.length === 0) return [];
+
+  const candidatePhrases = new Set<string>(DEFAULT_SMART_CLEANUP_PHRASES.map((phrase) => normalizeText(phrase)));
+
+  const unigramCounts = new Map<string, number>();
+  const bigramCounts = new Map<string, number>();
+  for (let i = 0; i < normalizedTokens.length; i += 1) {
+    const unigram = normalizedTokens[i]!.normalized;
+    unigramCounts.set(unigram, (unigramCounts.get(unigram) ?? 0) + 1);
+
+    if (i + 1 < normalizedTokens.length) {
+      const bigram = `${unigram} ${normalizedTokens[i + 1]!.normalized}`;
+      bigramCounts.set(bigram, (bigramCounts.get(bigram) ?? 0) + 1);
+    }
+  }
+
+  for (const [phrase, count] of unigramCounts) {
+    if (count >= 3 && phrase.length <= 12) candidatePhrases.add(phrase);
+  }
+  for (const [phrase, count] of bigramCounts) {
+    if (count >= 2) candidatePhrases.add(phrase);
+  }
+
+  const results: PhraseMatch[] = [];
+  for (const phrase of candidatePhrases) {
+    if (!phrase) continue;
+    const phraseParts = phrase.split(" ").filter(Boolean);
+    if (phraseParts.length === 0) continue;
+
+    const tokenIds: string[] = [];
+    for (let i = 0; i <= normalizedTokens.length - phraseParts.length; i += 1) {
+      let isMatch = true;
+      for (let j = 0; j < phraseParts.length; j += 1) {
+        if (normalizedTokens[i + j]!.normalized !== phraseParts[j]) {
+          isMatch = false;
+          break;
+        }
+      }
+      if (isMatch) {
+        for (let j = 0; j < phraseParts.length; j += 1) {
+          tokenIds.push(normalizedTokens[i + j]!.token.id);
+        }
+      }
+    }
+
+    const count = tokenIds.length / phraseParts.length;
+    if (count > 0) {
+      results.push({
+        phrase,
+        normalizedPhrase: phrase,
+        tokenIds,
+        count,
+      });
+    }
+  }
+
+  return results.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
 }
 
 function normalizeTranscript(input: unknown): WordToken[] {
@@ -101,6 +196,32 @@ function tokenAtTime(tokens: WordToken[], timeSec: number): number {
   return -1;
 }
 
+function buildScriptBody(tokens: WordToken[], deleted: Set<string>, includeDeleted = false): string {
+  const filtered = includeDeleted ? tokens : tokens.filter((t) => !deleted.has(t.id));
+  if (filtered.length === 0) return "";
+
+  const punctNoLeadSpace = /^[,.;:!?)]$/;
+  const openersNoTrailSpace = /^[(]$/;
+
+  let out = "";
+  for (const token of filtered) {
+    const text = token.text.trim();
+    if (!text) continue;
+    if (!out) {
+      out = text;
+      continue;
+    }
+    if (punctNoLeadSpace.test(text)) {
+      out += text;
+    } else if (openersNoTrailSpace.test(out.slice(-1))) {
+      out += text;
+    } else {
+      out += ` ${text}`;
+    }
+  }
+  return out.replace(/\s+\n/g, "\n").trim();
+}
+
 async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {
   const query = new URLSearchParams({ root, dir: relDir }).toString();
   const response = await fetch(`/api/files?${query}`);
@@ -136,9 +257,13 @@ export function App() {
     error: null,
     log: [],
   });
+  const [scriptExport, setScriptExport] = useState<ScriptExportState>({ status: "idle", outputPath: null, error: null });
+  const [scriptIncludeDeleted, setScriptIncludeDeleted] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
   const [previewCuts, setPreviewCuts] = useState(true);
+  const [ignoredPhrases, setIgnoredPhrases] = useState<Set<string>>(new Set());
+  const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
@@ -249,6 +374,17 @@ export function App() {
   const timingValid = videoDurationSec > 0 && transcriptDurationSec > 0;
   const timingMatch = timingValid && (timingDiffSec <= 1.25 || timingDiffSec / Math.max(videoDurationSec, 1) < 0.03);
 
+  const phraseMatches = useMemo(() => buildPhraseMatches(tokens), [tokens]);
+  const visiblePhraseMatches = useMemo(
+    () => phraseMatches.filter((match) => !ignoredPhrases.has(match.normalizedPhrase)),
+    [phraseMatches, ignoredPhrases],
+  );
+  const highlightedTokenIds = useMemo(() => {
+    if (!highlightedPhrase) return new Set<string>();
+    const match = phraseMatches.find((item) => item.normalizedPhrase === highlightedPhrase);
+    return new Set(match?.tokenIds ?? []);
+  }, [highlightedPhrase, phraseMatches]);
+
   async function loadDir(root: RootName, relDir: string) {
     setBrowsers((prev) => ({ ...prev, [root]: { ...prev[root], loading: true, error: null } }));
     try {
@@ -284,6 +420,8 @@ export function App() {
     }
     setTokens(nextTokens);
     setDeleted(new Set());
+    setIgnoredPhrases(new Set());
+    setHighlightedPhrase(null);
     return true;
   }
 
@@ -402,6 +540,54 @@ export function App() {
     await loadTranscript(selectedMedia.root, `transcripts/${sanitizeBaseName(selectedMedia.name)}.json`);
   }
 
+
+  async function exportScriptTxt() {
+    const scriptBody = buildScriptBody(tokens, deleted, scriptIncludeDeleted);
+    if (!scriptBody) {
+      setScriptExport({ status: "error", outputPath: null, error: "Script is empty" });
+      return;
+    }
+
+    const sourceMedia = selectedMedia ? `${selectedMedia.root}:${selectedMedia.path}` : "unknown";
+    const durationSec = videoDurationSec > 0 ? videoDurationSec : transcriptDurationSec;
+    const generatedAt = new Date().toISOString();
+
+    const header = [
+      "# Bit Cut Script Export",
+      `source_media: ${sourceMedia}`,
+      `duration_sec: ${durationSec.toFixed(3)}`,
+      `generated_at_utc: ${generatedAt}`,
+      `include_deleted_tokens: ${scriptIncludeDeleted ? "true" : "false"}`,
+      "",
+    ].join("\n");
+
+    const text = `${header}\n${scriptBody}\n`;
+
+    setScriptExport({ status: "working", outputPath: null, error: null });
+    const response = await fetch("/api/script/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        outputName: `${exportName || "edited"}-script`,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      setScriptExport({ status: "error", outputPath: null, error: await response.text() });
+      return;
+    }
+
+    const data = await response.json();
+    setScriptExport({ status: "done", outputPath: data.outputPath ?? null, error: null });
+  }
+
+  async function copyScriptToClipboard() {
+    const text = buildScriptBody(tokens, deleted, scriptIncludeDeleted);
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+  }
+
   function toggle(id: string) {
     setDeleted((prev) => {
       const next = new Set(prev);
@@ -409,6 +595,28 @@ export function App() {
       else next.add(id);
       return next;
     });
+  }
+
+  function togglePhraseDeletion(match: PhraseMatch) {
+    setDeleted((prev) => {
+      const next = new Set(prev);
+      const uniqueIds = Array.from(new Set(match.tokenIds));
+      const allDeleted = uniqueIds.every((id) => next.has(id));
+      for (const id of uniqueIds) {
+        if (allDeleted) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function ignorePhrase(match: PhraseMatch) {
+    setIgnoredPhrases((prev) => {
+      const next = new Set(prev);
+      next.add(match.normalizedPhrase);
+      return next;
+    });
+    setHighlightedPhrase((prev) => (prev === match.normalizedPhrase ? null : prev));
   }
 
   function onVideoTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
@@ -507,6 +715,20 @@ export function App() {
           </details>
         )}
 
+        <h3>Script Export</h3>
+        <label className="toggleRow">
+          <input type="checkbox" checked={scriptIncludeDeleted} onChange={(e) => setScriptIncludeDeleted(e.target.checked)} />
+          Include deleted tokens
+        </label>
+        <div className="row">
+          <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>
+            {scriptExport.status === "working" ? "Exporting Script…" : "Export Script (.txt)"}
+          </button>
+          <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+        </div>
+        <div className="hint">Status: {scriptExport.status}{scriptExport.error ? ` — ${scriptExport.error}` : ""}</div>
+        {scriptExport.outputPath && <div className="hint">Output path: {scriptExport.outputPath}</div>}
+
         <h3>Local file browser</h3>
         <div className="browserGrid">
           {(["inbox", "archive"] as RootName[]).map((root) => {
@@ -549,20 +771,56 @@ export function App() {
             : "Timing check pending: load video + transcript"}
         </div>
 
-        <p className="transcriptParagraph">
-          {tokens.map((t, index) => {
-            const isDeleted = deleted.has(t.id);
-            const isActive = index === activeTokenIndex;
-            const className = ["tokenInline", isDeleted ? "deleted" : "", isActive ? "active" : ""].filter(Boolean).join(" ");
-            return (
-              <span key={t.id}>
-                <button onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>
-                  {t.text}
-                </button>{" "}
-              </span>
-            );
-          })}
-        </p>
+        <div className="transcriptLayout">
+          <p className="transcriptParagraph">
+            {tokens.map((t, index) => {
+              const isDeleted = deleted.has(t.id);
+              const isActive = index === activeTokenIndex;
+              const isHighlighted = highlightedTokenIds.has(t.id);
+              const className = ["tokenInline", isDeleted ? "deleted" : "", isActive ? "active" : "", isHighlighted ? "highlighted" : ""]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <span key={t.id}>
+                  <button onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>
+                    {t.text}
+                  </button>{" "}
+                </span>
+              );
+            })}
+          </p>
+
+          <aside className="cleanupPanel">
+            <h3>Smart Cleanup</h3>
+            <div className="hint">Frequent filler words & phrases detected from transcript.</div>
+            {visiblePhraseMatches.length === 0 ? (
+              <div className="hint">No cleanup phrases found.</div>
+            ) : (
+              <ul className="cleanupList">
+                {visiblePhraseMatches.map((match) => {
+                  const uniqueIds = Array.from(new Set(match.tokenIds));
+                  const allDeleted = uniqueIds.length > 0 && uniqueIds.every((id) => deleted.has(id));
+                  const isHighlighted = highlightedPhrase === match.normalizedPhrase;
+                  return (
+                    <li key={match.normalizedPhrase} className="cleanupItem">
+                      <div className="cleanupTitle">
+                        <span>“{match.phrase}”</span>
+                        <span className="count">×{match.count}</span>
+                      </div>
+                      <div className="cleanupActions">
+                        <button onClick={() => setHighlightedPhrase((prev) => (prev === match.normalizedPhrase ? null : match.normalizedPhrase))}>
+                          {isHighlighted ? "Clear highlight" : "Highlight matches"}
+                        </button>
+                        <button onClick={() => togglePhraseDeletion(match)}>{allDeleted ? "Restore all matches" : "Remove all matches"}</button>
+                        <button onClick={() => ignorePhrase(match)}>Ignore phrase</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
+        </div>
 
         <h3>Cut/keep summary</h3>
         <ul>

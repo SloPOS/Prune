@@ -130,6 +130,14 @@ summary { cursor: pointer; color: var(--muted); }
 .hint { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .error { color: #ff9e9e; font-size: 13px; margin: 6px 0; }
 
+.transcriptLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
 .transcriptParagraph {
   border: 1px solid var(--line);
   background: #0f1726;
@@ -137,6 +145,7 @@ summary { cursor: pointer; color: var(--muted); }
   padding: 12px;
   line-height: 1.8;
   font-size: 16px;
+  margin: 0;
 }
 
 .tokenInline {
@@ -157,6 +166,60 @@ summary { cursor: pointer; color: var(--muted); }
 .tokenInline.deleted {
   text-decoration: line-through;
   color: var(--danger);
+}
+
+.tokenInline.highlighted {
+  background: rgba(255, 191, 95, 0.2);
+  color: #ffe2b2;
+}
+
+.cleanupPanel {
+  border: 1px solid var(--line);
+  background: #0f1726;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.cleanupList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.cleanupItem {
+  border: 1px solid #2d3d55;
+  border-radius: 8px;
+  padding: 8px;
+  background: #121c2e;
+}
+
+.cleanupTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: #dce7f8;
+}
+
+.cleanupTitle .count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cleanupActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cleanupActions button {
+  font-size: 12px;
+  padding: 6px 8px;
 }
 
 .timingBadge {
@@ -183,4 +246,5 @@ summary { cursor: pointer; color: var(--muted); }
   .page { grid-template-columns: 1fr !important; }
   .splitHandle { display: none; }
   .browserGrid { grid-template-columns: 1fr; }
+  .transcriptLayout { grid-template-columns: 1fr; }
 }

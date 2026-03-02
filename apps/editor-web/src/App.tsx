@@ -10,6 +10,7 @@ type BrowserEntry = {
 };
 
 type SelectedMedia = { root: RootName; path: string; name: string } | null;
+type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
 
 type TranscribeState = {
   jobId: string | null;
@@ -191,12 +192,11 @@ export function App() {
   const [isResizing, setIsResizing] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
-  const [pickerRoot, setPickerRoot] = useState<RootName>("inbox");
-  const [pickerDir, setPickerDir] = useState<string>(".");
-  const [pickerEntries, setPickerEntries] = useState<BrowserEntry[]>([]);
-  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerEntriesByDir, setPickerEntriesByDir] = useState<Record<string, BrowserEntry[]>>({});
+  const [pickerLoadingDirs, setPickerLoadingDirs] = useState<Set<string>>(new Set());
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(["inbox:.", "archive:."]));
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const [selectedEntryPath, setSelectedEntryPath] = useState<string>("");
+  const [selectedEntry, setSelectedEntry] = useState<TreeSelection>(null);
   const [uploadStatus, setUploadStatus] = useState<string>("idle");
 
   const [transcribe, setTranscribe] = useState<TranscribeState>({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
@@ -211,7 +211,9 @@ export function App() {
   const [searchPhrase, setSearchPhrase] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  useEffect(() => { void loadDir(pickerRoot, "."); }, []);
+  useEffect(() => {
+    void Promise.all([loadDir("inbox", "."), loadDir("archive", ".")]);
+  }, []);
   useEffect(() => {
     if (!isResizing) return;
     function onMove(event: MouseEvent) {
@@ -305,18 +307,35 @@ export function App() {
   }, [highlightedPhrase, phraseMatches, searchedTokenIds]);
 
   async function loadDir(root: RootName, relDir: string) {
-    setPickerLoading(true);
+    const dirKey = `${root}:${relDir}`;
+    setPickerLoadingDirs((prev) => new Set(prev).add(dirKey));
     setPickerError(null);
     try {
       const result = await fetchDir(root, relDir);
-      setPickerRoot(root);
-      setPickerDir(result.relDir);
-      setPickerEntries(result.entries);
+      const nextDirKey = `${root}:${result.relDir}`;
+      setPickerEntriesByDir((prev) => ({ ...prev, [nextDirKey]: result.entries }));
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : "Failed to load directory");
     } finally {
-      setPickerLoading(false);
+      setPickerLoadingDirs((prev) => {
+        const next = new Set(prev);
+        next.delete(dirKey);
+        return next;
+      });
     }
+  }
+
+  async function toggleDir(root: RootName, relPath: string) {
+    const key = `${root}:${relPath}`;
+    const isOpen = expandedDirs.has(key);
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (isOpen) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+    if (!isOpen && !pickerEntriesByDir[key]) await loadDir(root, relPath);
   }
 
   async function loadTranscript(root: RootName, relPath: string, silent = false) {
@@ -344,24 +363,23 @@ export function App() {
   }
 
   async function openSelectedFile() {
-    if (!selectedEntryPath) return;
-    const entry = pickerEntries.find((e) => e.relPath === selectedEntryPath && e.type === "file");
-    if (!entry) return;
+    if (!selectedEntry || selectedEntry.type !== "file") return;
+    const entryName = selectedEntry.relPath.split("/").filter(Boolean).at(-1) ?? selectedEntry.relPath;
 
-    if (entry.name.toLowerCase().endsWith(".json")) {
-      await loadTranscript(pickerRoot, entry.relPath);
+    if (entryName.toLowerCase().endsWith(".json")) {
+      await loadTranscript(selectedEntry.root, selectedEntry.relPath);
       return;
     }
 
-    if (isVideoFile(entry.name)) {
-      const query = new URLSearchParams({ root: pickerRoot, path: entry.relPath }).toString();
+    if (isVideoFile(entryName)) {
+      const query = new URLSearchParams({ root: selectedEntry.root, path: selectedEntry.relPath }).toString();
       setVideoSrc(`/api/media?${query}`);
-      setVideoLabel(`${pickerRoot}: ${entry.relPath}`);
-      setSelectedMedia({ root: pickerRoot, path: entry.relPath, name: entry.name });
-      setExportName(`${entry.name.replace(/\.[^.]+$/, "")}-edited`);
+      setVideoLabel(`${selectedEntry.root}: ${selectedEntry.relPath}`);
+      setSelectedMedia({ root: selectedEntry.root, path: selectedEntry.relPath, name: entryName });
+      setExportName(`${entryName.replace(/\.[^.]+$/, "")}-edited`);
       setTranscribe({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
       setExportState({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
-      await tryAutoLoadTranscript(pickerRoot, entry.name);
+      await tryAutoLoadTranscript(selectedEntry.root, entryName);
       return;
     }
 
@@ -457,15 +475,14 @@ export function App() {
     setUploadStatus("uploading");
     try {
       const form = new FormData();
-      form.append("root", pickerRoot);
-      form.append("dir", pickerDir);
       form.append("file", file);
       const response = await fetch("/api/files/upload", { method: "POST", body: form });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
-      setUploadStatus(`uploaded: ${data.relPath}`);
-      await loadDir(pickerRoot, pickerDir);
-      setSelectedEntryPath(data.relPath);
+      setUploadStatus(`uploaded: ${data.savedPath ?? data.relPath}`);
+      await Promise.all([loadDir("archive", "."), loadDir("archive", "incoming/uploads")]);
+      setExpandedDirs((prev) => new Set(prev).add("archive:incoming/uploads"));
+      setSelectedEntry({ root: "archive", relPath: data.relPath, type: "file" });
     } catch (error) {
       setUploadStatus(`error: ${error instanceof Error ? error.message : "upload failed"}`);
     }
@@ -521,9 +538,38 @@ export function App() {
     }
   }
 
-  const dirEntries = pickerEntries.filter((e) => e.type === "dir");
-  const fileEntries = pickerEntries.filter((e) => e.type === "file");
-  const parentDir = pickerDir === "." ? "." : (pickerDir.split("/").filter(Boolean).slice(0, -1).join("/") || ".");
+  function renderTree(root: RootName, relDir: string, depth = 0): React.ReactNode {
+    const key = `${root}:${relDir}`;
+    const entries = pickerEntriesByDir[key] ?? [];
+    const dirs = entries.filter((e) => e.type === "dir");
+    const files = entries.filter((e) => e.type === "file");
+    const loading = pickerLoadingDirs.has(key);
+
+    return (
+      <ul className="treeList" style={{ marginLeft: depth ? 14 : 0 }}>
+        {dirs.map((entry) => {
+          const dirKey = `${root}:${entry.relPath}`;
+          const open = expandedDirs.has(dirKey);
+          return (
+            <li key={dirKey}>
+              <button className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "dir" ? "active" : ""}`} onClick={() => { setSelectedEntry({ root, relPath: entry.relPath, type: "dir" }); void toggleDir(root, entry.relPath); }}>
+                {open ? "▾" : "▸"} 📁 {entry.name}
+              </button>
+              {open && renderTree(root, entry.relPath, depth + 1)}
+            </li>
+          );
+        })}
+        {files.map((entry) => (
+          <li key={`${root}:${entry.relPath}`}>
+            <button className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`} onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}>
+              📄 {entry.name}
+            </button>
+          </li>
+        ))}
+        {loading && <li className="hint">Loading…</li>}
+      </ul>
+    );
+  }
 
   return (
     <div className="page split" ref={splitRef} style={{ gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
@@ -565,40 +611,24 @@ export function App() {
         <h3>Local file picker</h3>
         <div className="pickerPanel">
           <div className="row">
-            <label>Source root:&nbsp;
-              <select value={pickerRoot} onChange={(e) => void loadDir(e.target.value as RootName, ".") }>
-                <option value="inbox">inbox</option>
-                <option value="archive">archive</option>
-              </select>
-            </label>
-            <button onClick={() => void loadDir(pickerRoot, pickerDir)} disabled={pickerLoading}>Refresh</button>
+            <button onClick={() => void Promise.all([loadDir("inbox", "."), loadDir("archive", ".")])}>Refresh roots</button>
+            <button onClick={() => void openSelectedFile()} disabled={!selectedEntry || selectedEntry.type !== "file"}>Open selected file</button>
           </div>
-          <div className="path">/{pickerDir === "." ? "" : pickerDir}</div>
-          <div className="row">
-            <button onClick={() => void loadDir(pickerRoot, parentDir)} disabled={pickerDir === "."}>Up</button>
-            <label style={{ minWidth: 220 }}>Folder:&nbsp;
-              <select value={pickerDir} onChange={(e) => void loadDir(pickerRoot, e.target.value)}>
-                <option value={pickerDir}>Current: {pickerDir}</option>
-                {dirEntries.map((entry) => <option key={entry.relPath} value={entry.relPath}>{entry.relPath}</option>)}
-              </select>
-            </label>
-            <label style={{ minWidth: 260, flex: 1 }}>File:&nbsp;
-              <select value={selectedEntryPath} onChange={(e) => setSelectedEntryPath(e.target.value)} style={{ width: "100%" }}>
-                <option value="">Select a media/transcript file...</option>
-                {fileEntries.map((entry) => <option key={entry.relPath} value={entry.relPath}>{entry.name}</option>)}
-              </select>
-            </label>
-            <button onClick={() => void openSelectedFile()} disabled={!selectedEntryPath}>Open selected</button>
+          <div className="path">Selected: {selectedEntry ? `${selectedEntry.root}:/${selectedEntry.relPath === "." ? "" : selectedEntry.relPath}` : "none"}</div>
+          <div className="treeRootWrap">
+            <div className="treeRootHeader">📦 inbox</div>
+            {renderTree("inbox", ".")}
+            <div className="treeRootHeader">🗄️ archive</div>
+            {renderTree("archive", ".")}
           </div>
           <div className="row">
-            <label>Upload media/transcript:&nbsp;
+            <label>Upload media/transcript to archive:/incoming/uploads:&nbsp;
               <input type="file" accept="video/*,.json,.txt,.vtt,.srt" onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
             </label>
           </div>
-          {pickerLoading && <div className="hint">Loading…</div>}
           {pickerError && <div className="error">{pickerError}</div>}
           {uploadStatus !== "idle" && <div className="hint">Upload: {uploadStatus}</div>}
-          <div className="hint">Supports local host storage roots (inbox/archive) and browser uploads into the selected folder.</div>
+          <div className="hint">Unified explorer spans inbox + archive. Uploads are always stored in /mnt/video-archive/incoming/uploads.</div>
         </div>
       </div>
 

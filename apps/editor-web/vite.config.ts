@@ -11,6 +11,8 @@ const FILE_ROOTS = {
   archive: "/mnt/video-archive",
 } as const;
 
+const UPLOAD_TARGET_DIR = "/mnt/video-archive/incoming/uploads";
+
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 type RootName = keyof typeof FILE_ROOTS;
@@ -477,44 +479,32 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const { fields, file } = await parseMultipart(req);
-          const root = (fields.root ?? "inbox") as RootName;
-          const relDir = String(fields.dir ?? ".");
+          const { file } = await parseMultipart(req);
+          const root: RootName = "archive";
+          const relDir = "incoming/uploads";
 
-          if (!(root in FILE_ROOTS)) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: "Invalid root" }));
-            return;
-          }
           if (!file) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Missing upload file" }));
             return;
           }
 
-          const targetDir = safeResolve(root, relDir);
-          if (!targetDir) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: "Invalid target directory" }));
-            return;
-          }
-
-          fs.mkdirSync(targetDir, { recursive: true });
+          fs.mkdirSync(UPLOAD_TARGET_DIR, { recursive: true });
           let outputName = file.name;
-          let outputPath = path.join(targetDir, outputName);
+          let outputPath = path.join(UPLOAD_TARGET_DIR, outputName);
           let count = 1;
           while (fs.existsSync(outputPath)) {
             const ext = path.extname(file.name);
             const base = path.basename(file.name, ext);
             outputName = `${base}-${count}${ext}`;
-            outputPath = path.join(targetDir, outputName);
+            outputPath = path.join(UPLOAD_TARGET_DIR, outputName);
             count += 1;
           }
 
           fs.writeFileSync(outputPath, file.data);
-          const relPath = path.relative(FILE_ROOTS[root], outputPath) || outputName;
+          const relPath = path.relative(FILE_ROOTS.archive, outputPath) || outputName;
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ root, relDir, relPath, sizeBytes: file.data.length }));
+          res.end(JSON.stringify({ root, relDir, relPath, savedPath: outputPath, sizeBytes: file.data.length }));
         } catch (error) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed upload" }));

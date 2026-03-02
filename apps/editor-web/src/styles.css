@@ -133,6 +133,41 @@ summary { cursor: pointer; color: var(--muted); }
   background: #0f1726;
 }
 
+.treeRootWrap {
+  border: 1px solid #2b3a50;
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  margin-bottom: 10px;
+}
+
+.treeRootHeader {
+  color: #cbd9ef;
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+
+.treeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.treeNode {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.treeNode.active {
+  background: rgba(110, 168, 254, 0.16);
+  border-color: rgba(110, 168, 254, 0.45);
+}
+
 select {
   background: var(--bg-soft);
   color: var(--text);

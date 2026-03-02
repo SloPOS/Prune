@@ -28,6 +28,15 @@ Edit spoken-video content by editing text:
 - `packages/export` – Resolve/NLE interchange exporters
 - `docs/` – architecture, product spec, tech decisions
 
+## Run the prototype
+
+```bash
+npm install
+npm run dev -w @bit-cut/editor-web
+```
+
+Then open the Vite URL. Click transcript words to mark them deleted and inspect generated cut/keep ranges.
+
 ## Immediate next steps
 
-See `docs/PHASE-1-PLAN.md` and open issues in GitHub.
+See `docs/PHASE-1-PLAN.md`.

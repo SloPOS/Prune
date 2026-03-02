@@ -1,0 +1,14 @@
+{
+  "name": "bit-cut-studio",
+  "private": true,
+  "version": "0.0.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "echo 'TODO: build'",
+    "dev": "echo 'TODO: dev'",
+    "test": "echo 'TODO: test'"
+  }
+}

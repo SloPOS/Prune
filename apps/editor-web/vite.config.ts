@@ -272,6 +272,54 @@ function sanitizeScriptName(raw: string): string {
   return `${base || "script"}.txt`;
 }
 
+function sanitizeUploadName(raw: string): string {
+  const base = path.basename(String(raw || "upload.bin")).replace(/[^a-zA-Z0-9._-]/g, "_");
+  return base || "upload.bin";
+}
+
+function parseMultipart(req: any): Promise<{ fields: Record<string, string>; file?: { name: string; data: Buffer } }> {
+  return new Promise((resolve, reject) => {
+    const contentType = String(req.headers["content-type"] || "");
+    const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+    if (!boundaryMatch) return reject(new Error("Missing multipart boundary"));
+    const boundary = Buffer.from(`--${boundaryMatch[1]}`);
+
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const fields: Record<string, string> = {};
+      let file: { name: string; data: Buffer } | undefined;
+
+      let start = body.indexOf(boundary) + boundary.length + 2;
+      while (start > boundary.length + 1 && start < body.length) {
+        const nextBoundaryPos = body.indexOf(boundary, start);
+        if (nextBoundaryPos === -1) break;
+
+        const part = body.subarray(start, nextBoundaryPos - 2);
+        const headerEnd = part.indexOf(Buffer.from("\r\n\r\n"));
+        if (headerEnd !== -1) {
+          const headerText = part.subarray(0, headerEnd).toString("utf-8");
+          const content = part.subarray(headerEnd + 4);
+
+          const nameMatch = headerText.match(/name="([^"]+)"/);
+          const filenameMatch = headerText.match(/filename="([^"]*)"/);
+          const partName = nameMatch?.[1];
+          if (partName) {
+            if (filenameMatch && filenameMatch[1]) file = { name: sanitizeUploadName(filenameMatch[1]), data: content };
+            else fields[partName] = content.toString("utf-8");
+          }
+        }
+
+        start = nextBoundaryPos + boundary.length + 2;
+      }
+
+      resolve({ fields, file });
+    });
+    req.on("error", reject);
+  });
+}
+
 function runFfmpeg(job: ExportJob, args: string[]): Promise<number | null> {
   return new Promise((resolve) => {
     const proc = spawn("ffmpeg", args, { cwd: process.cwd() });
@@ -418,6 +466,58 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to list files" }));
+        }
+      });
+
+      server.middlewares.use("/api/files/upload", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const { fields, file } = await parseMultipart(req);
+          const root = (fields.root ?? "inbox") as RootName;
+          const relDir = String(fields.dir ?? ".");
+
+          if (!(root in FILE_ROOTS)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+          if (!file) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Missing upload file" }));
+            return;
+          }
+
+          const targetDir = safeResolve(root, relDir);
+          if (!targetDir) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid target directory" }));
+            return;
+          }
+
+          fs.mkdirSync(targetDir, { recursive: true });
+          let outputName = file.name;
+          let outputPath = path.join(targetDir, outputName);
+          let count = 1;
+          while (fs.existsSync(outputPath)) {
+            const ext = path.extname(file.name);
+            const base = path.basename(file.name, ext);
+            outputName = `${base}-${count}${ext}`;
+            outputPath = path.join(targetDir, outputName);
+            count += 1;
+          }
+
+          fs.writeFileSync(outputPath, file.data);
+          const relPath = path.relative(FILE_ROOTS[root], outputPath) || outputName;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ root, relDir, relPath, sizeBytes: file.data.length }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed upload" }));
         }
       });
 

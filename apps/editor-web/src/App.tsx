@@ -1,17 +1,159 @@
-import { useMemo, useState } from "react";
-import { cutRangesFromDeletedTokens, keepRangesFromCuts } from "@bit-cut/core";
+import { useEffect, useMemo, useState } from "react";
+import { cutRangesFromDeletedTokens, keepRangesFromCuts, type WordToken } from "@bit-cut/core";
 import { mockTranscript } from "./mockTranscript";
 
-const MOCK_DURATION_SEC = 8;
+type RootName = "inbox" | "archive";
+type BrowserEntry = {
+  name: string;
+  type: "dir" | "file";
+  relPath: string;
+  sizeBytes: number | null;
+};
+
+type BrowserState = {
+  relDir: string;
+  entries: BrowserEntry[];
+  loading: boolean;
+  error: string | null;
+};
+
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
+
+function isVideoFile(name: string) {
+  const lower = name.toLowerCase();
+  return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function normalizeTranscript(input: unknown): WordToken[] {
+  const asArray = Array.isArray(input)
+    ? input
+    : typeof input === "object" && input && Array.isArray((input as { tokens?: unknown[] }).tokens)
+      ? (input as { tokens: unknown[] }).tokens
+      : [];
+
+  const normalized = asArray
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const token = item as Record<string, unknown>;
+      const text = String(token.text ?? token.word ?? "").trim();
+      const startSec = Number(token.startSec ?? token.start ?? token.start_time ?? token.startTime);
+      const endSec = Number(token.endSec ?? token.end ?? token.end_time ?? token.endTime);
+
+      if (!text || Number.isNaN(startSec) || Number.isNaN(endSec) || endSec <= startSec) {
+        return null;
+      }
+
+      return {
+        id: String(token.id ?? `tok-${index}`),
+        text,
+        startSec,
+        endSec,
+      } satisfies WordToken;
+    })
+    .filter((t): t is WordToken => Boolean(t));
+
+  return normalized;
+}
+
+async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {
+  const query = new URLSearchParams({ root, dir: relDir }).toString();
+  const response = await fetch(`/api/files?${query}`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
 
 export function App() {
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
+  const [tokens, setTokens] = useState<WordToken[]>(mockTranscript);
+  const [videoSrc, setVideoSrc] = useState<string>("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4");
+  const [videoLabel, setVideoLabel] = useState<string>("Sample video");
 
-  const cuts = useMemo(
-    () => cutRangesFromDeletedTokens(mockTranscript, deleted),
-    [deleted],
+  const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
+    inbox: { relDir: ".", entries: [], loading: true, error: null },
+    archive: { relDir: ".", entries: [], loading: true, error: null },
+  });
+
+  useEffect(() => {
+    (async () => {
+      await Promise.all([loadDir("inbox", "."), loadDir("archive", ".")]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const cuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
+  const durationSec = useMemo(
+    () => tokens.reduce((max, t) => Math.max(max, t.endSec), 0),
+    [tokens],
   );
-  const keeps = useMemo(() => keepRangesFromCuts(MOCK_DURATION_SEC, cuts), [cuts]);
+  const keeps = useMemo(() => keepRangesFromCuts(durationSec, cuts), [cuts, durationSec]);
+
+  const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
+  const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
+
+  async function loadDir(root: RootName, relDir: string) {
+    setBrowsers((prev) => ({
+      ...prev,
+      [root]: { ...prev[root], loading: true, error: null },
+    }));
+
+    try {
+      const result = await fetchDir(root, relDir);
+      setBrowsers((prev) => ({
+        ...prev,
+        [root]: { relDir: result.relDir, entries: result.entries, loading: false, error: null },
+      }));
+    } catch (error) {
+      setBrowsers((prev) => ({
+        ...prev,
+        [root]: {
+          ...prev[root],
+          loading: false,
+          error: error instanceof Error ? error.message : "Failed to load directory",
+        },
+      }));
+    }
+  }
+
+  async function onEntryClick(root: RootName, entry: BrowserEntry) {
+    if (entry.type === "dir") {
+      await loadDir(root, entry.relPath);
+      return;
+    }
+
+    if (entry.name.toLowerCase().endsWith(".json")) {
+      const query = new URLSearchParams({ root, path: entry.relPath }).toString();
+      const response = await fetch(`/api/transcript?${query}`);
+      if (!response.ok) {
+        alert(`Failed to load transcript: ${await response.text()}`);
+        return;
+      }
+      const data = await response.json();
+      const nextTokens = normalizeTranscript(data);
+      if (nextTokens.length === 0) {
+        alert("No valid transcript tokens found in JSON.");
+        return;
+      }
+      setTokens(nextTokens);
+      setDeleted(new Set());
+      return;
+    }
+
+    if (isVideoFile(entry.name)) {
+      const query = new URLSearchParams({ root, path: entry.relPath }).toString();
+      setVideoSrc(`/api/media?${query}`);
+      setVideoLabel(`${root}: ${entry.relPath}`);
+    }
+  }
+
+  function goUp(root: RootName) {
+    const current = browsers[root].relDir;
+    if (current === ".") return;
+    const parts = current.split("/").filter(Boolean);
+    const parent = parts.length <= 1 ? "." : parts.slice(0, -1).join("/");
+    void loadDir(root, parent);
+  }
 
   function toggle(id: string) {
     setDeleted((prev) => {
@@ -26,13 +168,42 @@ export function App() {
     <div className="page">
       <div className="pane videoPane">
         <h2>Video</h2>
-        <video controls width={640} src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" />
+        <div className="hint">Selected: {videoLabel}</div>
+        <video controls width={640} src={videoSrc} />
+
+        <h3>Local file browser</h3>
+        <div className="browserGrid">
+          {(["inbox", "archive"] as RootName[]).map((root) => {
+            const state = browsers[root];
+            return (
+              <div key={root} className="browserCol">
+                <div className="browserHeader">
+                  <strong>{root}</strong>
+                  <button onClick={() => goUp(root)} disabled={state.relDir === "."}>Up</button>
+                </div>
+                <div className="path">/{state.relDir === "." ? "" : state.relDir}</div>
+                {state.loading && <div className="hint">Loading…</div>}
+                {state.error && <div className="error">{state.error}</div>}
+                <ul className="fileList">
+                  {state.entries.map((entry) => (
+                    <li key={`${entry.type}:${entry.relPath}`}>
+                      <button className="fileBtn" onClick={() => void onEntryClick(root, entry)}>
+                        {entry.type === "dir" ? "📁" : "📄"} {entry.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="pane transcriptPane">
         <h2>Transcript (click words to cut)</h2>
+        <div className="hint">Load transcript by selecting any .json file from the browser.</div>
         <div className="tokens">
-          {mockTranscript.map((t) => {
+          {tokens.map((t) => {
             const isDeleted = deleted.has(t.id);
             return (
               <button key={t.id} onClick={() => toggle(t.id)} className={isDeleted ? "token deleted" : "token"}>
@@ -41,6 +212,14 @@ export function App() {
             );
           })}
         </div>
+
+        <h3>Cut/keep summary</h3>
+        <ul>
+          <li>Tokens: {tokens.length}</li>
+          <li>Deleted tokens: {deleted.size}</li>
+          <li>Cut ranges: {cuts.length} ({totalCutSec.toFixed(2)}s)</li>
+          <li>Keep ranges: {keeps.length} ({totalKeepSec.toFixed(2)}s)</li>
+        </ul>
 
         <h3>Computed cut ranges</h3>
         <pre>{JSON.stringify(cuts, null, 2)}</pre>

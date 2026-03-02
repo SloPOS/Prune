@@ -12,15 +12,26 @@ def main():
     p.add_argument("--device", default="cpu")
     p.add_argument("--compute-type", default="int8")
     p.add_argument("--language", default="en")
+    p.add_argument("--beam-size", type=int, default=1)
+    p.add_argument("--vad-filter", action="store_true")
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
     model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
-    segments, info = model.transcribe(args.audio, language=args.language, word_timestamps=True)
+    segments, info = model.transcribe(
+        args.audio,
+        language=args.language,
+        word_timestamps=True,
+        beam_size=max(1, int(args.beam_size)),
+        vad_filter=bool(args.vad_filter),
+    )
 
     tokens = []
     idx = 1
     for seg in segments:
+      seg_start = 0.0 if seg.start is None else float(seg.start)
+      seg_end = 0.0 if seg.end is None else float(seg.end)
+      print(f"[{seg_start:08.3f} -> {seg_end:08.3f}]", flush=True)
       if not seg.words:
         continue
       for w in seg.words:

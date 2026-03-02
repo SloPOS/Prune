@@ -10,8 +10,11 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 type RootName = string;
 type StudioSettings = {
   roots: Array<{ id: string; name: string; path: string }>;
-  uploadSubdir: string;
+  uploadDir: string;
   exportDir?: string;
+  transcriptDir?: string;
+  projectsDir?: string;
+  exportCacheHours?: number;
 };
 
 const SETTINGS_PATH = path.resolve(process.env.BITCUT_SETTINGS_PATH || path.join(REPO_ROOT, "data", "config.json"));
@@ -20,11 +23,28 @@ const DEFAULT_SETTINGS: StudioSettings = {
     { id: "root-1", name: "Media", path: path.resolve(process.env.BITCUT_INBOX_ROOT || path.resolve(REPO_ROOT, "inbox")) },
     { id: "root-2", name: "Archive", path: path.resolve(process.env.BITCUT_ARCHIVE_ROOT || path.resolve(REPO_ROOT, "data", "archive")) },
   ],
-  uploadSubdir: (process.env.BITCUT_UPLOAD_SUBDIR || "incoming/uploads").replace(/^\/+/, ""),
+  uploadDir: path.resolve(process.env.BITCUT_UPLOAD_DIR || path.resolve(REPO_ROOT, "data", "uploads")),
   exportDir: process.env.BITCUT_EXPORT_DIR,
+  transcriptDir: path.resolve(process.env.BITCUT_TRANSCRIPT_DIR || path.resolve(REPO_ROOT, "data", "transcripts")),
+  projectsDir: path.resolve(process.env.BITCUT_PROJECTS_DIR || path.resolve(REPO_ROOT, "data", "projects")),
+  exportCacheHours: Number(process.env.BITCUT_EXPORT_CACHE_HOURS || 72),
 };
 
 let studioSettings: StudioSettings = loadSettings();
+
+function ensureManagedDirs() {
+  const dirs = [
+    studioSettings.uploadDir,
+    studioSettings.exportDir,
+    studioSettings.transcriptDir,
+    studioSettings.projectsDir,
+  ].filter((d): d is string => Boolean(d));
+  for (const dir of dirs) {
+    try { fs.mkdirSync(path.resolve(dir), { recursive: true }); } catch {}
+  }
+}
+
+ensureManagedDirs();
 
 type TranscribeJob = {
   id: string;
@@ -89,7 +109,10 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
-const PROJECTS_DIR = path.resolve(REPO_ROOT, "data", "projects");
+
+function projectsDir(): string {
+  return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || path.resolve(REPO_ROOT, "data", "projects"));
+}
 
 
 type FcpxmlExportJob = {
@@ -116,8 +139,11 @@ function loadSettings(): StudioSettings {
       : DEFAULT_SETTINGS.roots;
     return {
       roots: roots.length > 0 ? roots : DEFAULT_SETTINGS.roots,
-      uploadSubdir: String(raw.uploadSubdir || DEFAULT_SETTINGS.uploadSubdir).replace(/^\/+/, ""),
+      uploadDir: path.resolve(String(raw.uploadDir || DEFAULT_SETTINGS.uploadDir)),
       exportDir: raw.exportDir ? path.resolve(String(raw.exportDir)) : DEFAULT_SETTINGS.exportDir,
+      transcriptDir: raw.transcriptDir ? path.resolve(String(raw.transcriptDir)) : DEFAULT_SETTINGS.transcriptDir,
+      projectsDir: raw.projectsDir ? path.resolve(String(raw.projectsDir)) : DEFAULT_SETTINGS.projectsDir,
+      exportCacheHours: Number(raw.exportCacheHours ?? DEFAULT_SETTINGS.exportCacheHours ?? 72),
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -128,6 +154,7 @@ function saveSettings(next: StudioSettings) {
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(next, null, 2), "utf-8");
   studioSettings = next;
+  ensureManagedDirs();
 }
 
 function pathHealth(targetPath: string) {
@@ -144,7 +171,10 @@ function pathHealth(targetPath: string) {
 }
 
 function getRootMap(): Record<string, string> {
-  return Object.fromEntries(studioSettings.roots.map((r) => [r.id, path.resolve(r.path)]));
+  const map = Object.fromEntries(studioSettings.roots.map((r) => [r.id, path.resolve(r.path)]));
+  if (studioSettings.uploadDir) map["__upload__"] = path.resolve(studioSettings.uploadDir);
+  if (studioSettings.transcriptDir) map["__transcripts__"] = path.resolve(studioSettings.transcriptDir);
+  return map;
 }
 
 function needsSetup(): boolean {
@@ -199,16 +229,20 @@ function parseFfmpegTimeSec(text: string): number | undefined {
 }
 
 function parseWhisperProgressSec(text: string): number | undefined {
-  const matches = [...text.matchAll(/\[(\d{2}:\d{2}\.\d{3})\s*->\s*(\d{2}:\d{2}\.\d{3})\]/g)];
+  const matches = [...text.matchAll(/\[(\d+(?::\d{2}){0,2}(?:\.\d+)?)\s*->\s*(\d+(?::\d{2}){0,2}(?:\.\d+)?)\]/g)];
   if (matches.length === 0) return undefined;
   const toSec = (stamp: string) => {
-    const [mm, rest] = stamp.split(":");
-    return Number(mm) * 60 + Number(rest);
+    const parts = stamp.split(":").map((v) => Number(v));
+    if (parts.some((v) => !Number.isFinite(v))) return undefined;
+    if (parts.length === 1) return parts[0];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return undefined;
   };
   let maxSec = 0;
   for (const m of matches) {
     const sec = toSec(m[2]);
-    if (Number.isFinite(sec)) maxSec = Math.max(maxSec, sec);
+    if (sec !== undefined && Number.isFinite(sec)) maxSec = Math.max(maxSec, sec);
   }
   return maxSec > 0 ? maxSec : undefined;
 }
@@ -694,23 +728,27 @@ function estimateTranscribeStatus(job: TranscribeJob): { percent: number | null;
   }
 
   if (job.phase === "transcribing") {
-    const expectedSpeed = transcribeExpectedSpeed(job.device ?? "cpu", job.model ?? "small");
     const elapsedSec = Math.max(1, Math.round((now - (job.phaseStartedAt ?? job.startedAt)) / 1000));
 
     if (duration) {
-      let processedSec = job.transcribedSec;
-      let speed = processedSec !== undefined && elapsedSec > 0 ? processedSec / elapsedSec : undefined;
-      if (processedSec === undefined) {
-        processedSec = Math.min(duration, elapsedSec * expectedSpeed);
-        speed = expectedSpeed;
+      const processedSec = job.transcribedSec;
+      if (processedSec !== undefined) {
+        const speed = elapsedSec > 0 ? processedSec / elapsedSec : undefined;
+        const percent = clampPercent(10 + (Math.min(duration, processedSec) / duration) * 90);
+        const remainingMediaSec = Math.max(0, duration - Math.min(duration, processedSec));
+        const etaSec = speed && speed > 0 ? Math.round(remainingMediaSec / speed) : null;
+        return {
+          percent,
+          etaSec,
+          speedLabel: speed && Number.isFinite(speed) ? `${speed.toFixed(2)}x realtime` : "transcribing",
+        };
       }
-      const percent = clampPercent(35 + (Math.min(duration, processedSec) / duration) * 65);
-      const remainingMediaSec = Math.max(0, duration - Math.min(duration, processedSec));
-      const etaSec = speed && speed > 0 ? Math.round(remainingMediaSec / speed) : null;
+
+      const warmupPct = clampPercent(Math.min(14, 10 + elapsedSec * 0.08));
       return {
-        percent,
-        etaSec,
-        speedLabel: speed && Number.isFinite(speed) ? `${speed.toFixed(2)}x realtime` : "transcribing",
+        percent: warmupPct,
+        etaSec: null,
+        speedLabel: "warming up model",
       };
     }
 
@@ -800,8 +838,11 @@ function studioApiPlugin(): Plugin {
             }
             const next: StudioSettings = {
               roots,
-              uploadSubdir: String(body.uploadSubdir || "incoming/uploads").replace(/^\/+/, ""),
+              uploadDir: path.resolve(String(body.uploadDir || DEFAULT_SETTINGS.uploadDir)),
               exportDir: body.exportDir ? path.resolve(String(body.exportDir)) : undefined,
+              transcriptDir: body.transcriptDir ? path.resolve(String(body.transcriptDir)) : undefined,
+              projectsDir: body.projectsDir ? path.resolve(String(body.projectsDir)) : undefined,
+              exportCacheHours: Number(body.exportCacheHours || 72),
             };
             saveSettings(next);
             res.setHeader("Content-Type", "application/json");
@@ -820,10 +861,12 @@ function studioApiPlugin(): Plugin {
         try {
           const roots = studioSettings.roots.map((r) => ({ id: r.id, name: r.name, ...pathHealth(r.path) }));
           const firstRoot = studioSettings.roots[0]?.path || process.cwd();
-          const uploadPath = path.join(firstRoot, studioSettings.uploadSubdir || "incoming/uploads");
+          const uploadPath = studioSettings.uploadDir || path.join(firstRoot, "uploads");
           const exportPath = studioSettings.exportDir || path.join(firstRoot, "exports");
+          const transcriptPath = studioSettings.transcriptDir || path.join(firstRoot, "transcripts");
+          const projectsPath = studioSettings.projectsDir || path.join(firstRoot, "projects");
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ roots, upload: pathHealth(uploadPath), export: pathHealth(exportPath) }));
+          res.end(JSON.stringify({ roots, upload: pathHealth(uploadPath), export: pathHealth(exportPath), transcripts: pathHealth(transcriptPath), projects: pathHealth(projectsPath) }));
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed health check" }));
@@ -911,7 +954,7 @@ function studioApiPlugin(): Plugin {
             return;
           }
           const key = projectKey(root, relPath);
-          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+          fs.mkdirSync(projectsDir(), { recursive: true });
           const id = String(body.projectId || crypto.randomUUID());
           const projectName = sanitizeProjectName(String(body.projectName || path.basename(relPath)));
           const payload = {
@@ -923,7 +966,7 @@ function studioApiPlugin(): Plugin {
             key,
             updatedAt: new Date().toISOString(),
           };
-          const out = path.join(PROJECTS_DIR, `${id}.json`);
+          const out = path.join(projectsDir(), `${id}.json`);
           fs.writeFileSync(out, JSON.stringify(payload, null, 2), "utf-8");
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true, projectId: id, projectName, outputPath: out }));
@@ -935,11 +978,11 @@ function studioApiPlugin(): Plugin {
 
       server.middlewares.use("/api/project/list", async (_req, res) => {
         try {
-          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
-          const files = fs.readdirSync(PROJECTS_DIR).filter((n) => n.endsWith(".json"));
+          fs.mkdirSync(projectsDir(), { recursive: true });
+          const files = fs.readdirSync(projectsDir()).filter((n) => n.endsWith(".json"));
           const projects = files.map((name) => {
             try {
-              const data = JSON.parse(fs.readFileSync(path.join(PROJECTS_DIR, name), "utf-8"));
+              const data = JSON.parse(fs.readFileSync(path.join(projectsDir(), name), "utf-8"));
               return {
                 projectId: data.projectId || path.basename(name, ".json"),
                 projectName: data.projectName || "Project",
@@ -976,7 +1019,7 @@ function studioApiPlugin(): Plugin {
             res.end(JSON.stringify({ error: "Missing projectId" }));
             return;
           }
-          const file = path.join(PROJECTS_DIR, `${projectId}.json`);
+          const file = path.join(projectsDir(), `${projectId}.json`);
           if (fs.existsSync(file)) fs.unlinkSync(file);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true }));
@@ -991,7 +1034,7 @@ function studioApiPlugin(): Plugin {
           const url = new URL(req.url ?? "", "http://localhost");
           const projectId = String(url.searchParams.get("projectId") || "");
           if (projectId) {
-            const file = path.join(PROJECTS_DIR, `${projectId}.json`);
+            const file = path.join(projectsDir(), `${projectId}.json`);
             if (!fs.existsSync(file)) {
               res.statusCode = 404;
               res.end(JSON.stringify({ error: "Project not found" }));
@@ -1010,10 +1053,10 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          fs.mkdirSync(PROJECTS_DIR, { recursive: true });
-          const files = fs.readdirSync(PROJECTS_DIR).filter((n) => n.endsWith(".json"));
+          fs.mkdirSync(projectsDir(), { recursive: true });
+          const files = fs.readdirSync(projectsDir()).filter((n) => n.endsWith(".json"));
           for (const name of files) {
-            const file = path.join(PROJECTS_DIR, name);
+            const file = path.join(projectsDir(), name);
             try {
               const data = JSON.parse(fs.readFileSync(file, "utf-8"));
               if (String(data.root) === root && String(data.path) === relPath) {
@@ -1032,8 +1075,12 @@ function studioApiPlugin(): Plugin {
         }
       });
 
-      server.middlewares.use("/api/files", async (req, res) => {
+      server.middlewares.use("/api/files", async (req, res, next) => {
         try {
+          if (req.method !== "GET") {
+            next();
+            return;
+          }
           const url = new URL(req.url ?? "", "http://localhost");
           const root = (url.searchParams.get("root") ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relDir = url.searchParams.get("dir") ?? ".";
@@ -1046,6 +1093,9 @@ function studioApiPlugin(): Plugin {
           }
 
           const absDir = safeResolve(root, relDir);
+          if (root === "__upload__" && absDir && !fs.existsSync(absDir)) {
+            try { fs.mkdirSync(absDir, { recursive: true }); } catch {}
+          }
           if (!absDir || !fs.existsSync(absDir) || !fs.statSync(absDir).isDirectory()) {
             res.statusCode = 404;
             res.end(JSON.stringify({ error: "Directory not found" }));
@@ -1077,6 +1127,34 @@ function studioApiPlugin(): Plugin {
         }
       });
 
+      server.middlewares.use("/api/files/delete", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const root = String(body.root || "") as RootName;
+          const relPath = String(body.path || "");
+          const absPath = safeResolve(root, relPath);
+          if (!absPath || !fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "File not found" }));
+            return;
+          }
+          fs.unlinkSync(absPath);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to delete file" }));
+        }
+      });
+
       server.middlewares.use("/api/files/upload", async (req, res) => {
         try {
           if (req.method !== "POST") {
@@ -1086,8 +1164,7 @@ function studioApiPlugin(): Plugin {
           }
 
           const { file } = await parseMultipart(req);
-          const root: RootName = studioSettings.roots[0]?.id ?? "";
-          const relDir = studioSettings.uploadSubdir;
+          const root: RootName = "__upload__";
           const rootMap = getRootMap();
 
           if (!file) {
@@ -1102,7 +1179,7 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const uploadTargetDir = path.join(rootMap[root]!, relDir);
+          const uploadTargetDir = path.resolve(studioSettings.uploadDir || path.join(rootMap[root]!, "uploads"));
           fs.mkdirSync(uploadTargetDir, { recursive: true });
           let outputName = file.name;
           let outputPath = path.join(uploadTargetDir, outputName);
@@ -1117,6 +1194,7 @@ function studioApiPlugin(): Plugin {
 
           fs.writeFileSync(outputPath, file.data);
           const relPath = path.relative(rootMap[root]!, outputPath) || outputName;
+          const relDir = path.dirname(relPath) === "." ? "." : path.dirname(relPath);
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ root, relDir, relPath, savedPath: outputPath, sizeBytes: file.data.length }));
         } catch (error) {
@@ -1303,6 +1381,8 @@ function studioApiPlugin(): Plugin {
           const device = String(body.device ?? "cpu");
           const computeType = String(body.computeType ?? "int8");
           const language = String(body.language ?? "en");
+          const beamSize = Math.max(1, Number(body.beamSize ?? 1));
+          const vadFilter = Boolean(body.vadFilter ?? false);
           const rootMap = getRootMap();
 
           if (!(root in rootMap)) {
@@ -1320,8 +1400,9 @@ function studioApiPlugin(): Plugin {
 
           const baseName = path.basename(relPath, path.extname(relPath));
           const cleanName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
-          const transcriptRelPath = path.join("transcripts", `${cleanName}.json`);
-          const transcriptAbsPath = path.resolve(rootMap[root]!, transcriptRelPath);
+          const transcriptRoot = path.resolve(studioSettings.transcriptDir || DEFAULT_SETTINGS.transcriptDir || path.resolve(REPO_ROOT, "data", "transcripts"));
+          const transcriptRelPath = `${cleanName}.json`;
+          const transcriptAbsPath = path.resolve(transcriptRoot, transcriptRelPath);
 
           const id = crypto.randomUUID();
           const job: TranscribeJob = {
@@ -1390,9 +1471,9 @@ function studioApiPlugin(): Plugin {
             if (job.mediaDurationSec !== undefined) {
               job.extractionProgressSec = job.mediaDurationSec;
             }
-            pushLog(job, `Running Whisper (${model}, ${device}, ${computeType})`);
+            pushLog(job, `Running Whisper (${model}, ${device}, ${computeType}, beam=${beamSize}${vadFilter ? ", vad" : ""})`);
 
-            const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --language "${language}" --out "${transcriptAbsPath}"`], {
+            const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --beam-size "${beamSize}" ${vadFilter ? "--vad-filter" : ""} --language "${language}" --out "${transcriptAbsPath}"`], {
               cwd: REPO_ROOT,
             });
 

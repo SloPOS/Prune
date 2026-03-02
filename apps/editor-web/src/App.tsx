@@ -24,6 +24,9 @@ type TranscribeState = {
   mediaDurationSec?: number;
   transcribedSec?: number;
   phase?: "queued" | "extracting" | "transcribing" | "finalizing" | "done" | "error";
+  percent?: number | null;
+  etaSec?: number | null;
+  speedLabel?: string | null;
 };
 
 type ExportState = {
@@ -242,11 +245,12 @@ export function App() {
   const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>(null);
   const [exportName, setExportName] = useState<string>("edited-cut");
   const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
-  const [splitLeftPct, setSplitLeftPct] = useState<number>(58);
+  const [splitLeftPct, setSplitLeftPct] = useState<number>(40);
   const [isResizing, setIsResizing] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
   const [roots, setRoots] = useState<RootConfig[]>([]);
+  const [transcriptPickerRoot, setTranscriptPickerRoot] = useState<RootConfig | null>(null);
   const [pickerEntriesByDir, setPickerEntriesByDir] = useState<Record<string, BrowserEntry[]>>({});
   const [pickerLoadingDirs, setPickerLoadingDirs] = useState<Set<string>>(new Set());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -257,9 +261,14 @@ export function App() {
   const [settingsNeedsSetup, setSettingsNeedsSetup] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsRootsDraft, setSettingsRootsDraft] = useState<Array<{ name: string; path: string }>>([{ name: "Media", path: "" }]);
-  const [settingsUploadSubdir, setSettingsUploadSubdir] = useState("incoming/uploads");
+  const [settingsUploadDir, setSettingsUploadDir] = useState("");
   const [settingsExportDir, setSettingsExportDir] = useState("");
+  const [settingsTranscriptDir, setSettingsTranscriptDir] = useState("");
+  const [settingsProjectsDir, setSettingsProjectsDir] = useState("");
+  const [settingsExportCacheHours, setSettingsExportCacheHours] = useState("72");
+  const [isLightMode, setIsLightMode] = useState(false);
   const [settingsHealth, setSettingsHealth] = useState<any>(null);
+  const [settingsDraftRootHealth, setSettingsDraftRootHealth] = useState<Record<number, "ok" | "missing" | "checking">>({});
   const [showDirPicker, setShowDirPicker] = useState(false);
   const [dirPickerPath, setDirPickerPath] = useState("/");
   const [dirPickerParent, setDirPickerParent] = useState<string | null>(null);
@@ -280,6 +289,10 @@ export function App() {
   const [filePickerShowAll, setFilePickerShowAll] = useState(false);
   const [showTranscriptPrompt, setShowTranscriptPrompt] = useState(false);
   const [showTranscribeModal, setShowTranscribeModal] = useState(false);
+  const [sttPreset, setSttPreset] = useState<"fast" | "balanced" | "quality">("balanced");
+  const [showSttPresetMenu, setShowSttPresetMenu] = useState(false);
+  const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
+  const [lastAutoLoadedTranscriptJobId, setLastAutoLoadedTranscriptJobId] = useState<string | null>(null);
   const [filePickerFromTranscriptPrompt, setFilePickerFromTranscriptPrompt] = useState(false);
   const [exportCapabilities, setExportCapabilities] = useState<Array<{ format: string; videoEncoder: string | null; speed: string }>>([]);
   const [downloadedExportJobs, setDownloadedExportJobs] = useState<Set<string>>(new Set());
@@ -289,6 +302,9 @@ export function App() {
   const [showLoadProjectModal, setShowLoadProjectModal] = useState(false);
   const [savedProjects, setSavedProjects] = useState<Array<{ projectId: string; projectName: string; root: string; path: string; updatedAt?: string }>>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [confirmDeleteFile, setConfirmDeleteFile] = useState<{ root: RootName; relPath: string } | null>(null);
+  const [showProjectNameModal, setShowProjectNameModal] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
   const [openLeftPanel, setOpenLeftPanel] = useState<"noise" | "stt" | null>(null);
   const [subtitleIncludeDeleted, setSubtitleIncludeDeleted] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
@@ -313,18 +329,32 @@ export function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const jsonUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    const savedTheme = window.localStorage.getItem("bitcut-theme");
+    if (savedTheme === "light") setIsLightMode(true);
     void loadSettingsAndRoots();
     void loadExportCapabilities();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", isLightMode ? "light" : "dark");
+    window.localStorage.setItem("bitcut-theme", isLightMode ? "light" : "dark");
+  }, [isLightMode]);
   useEffect(() => {
     if (!isResizing) return;
     function onMove(event: MouseEvent) {
       if (!splitRef.current) return;
       const rect = splitRef.current.getBoundingClientRect();
+      const minLeftPx = 420;
+      const minRightPx = 520;
+      const minPct = (minLeftPx / rect.width) * 100;
+      const maxPct = 100 - ((minRightPx + 8) / rect.width) * 100;
       const pct = ((event.clientX - rect.left) / rect.width) * 100;
-      setSplitLeftPct(Math.min(78, Math.max(35, pct)));
+      const clamped = Math.max(minPct, Math.min(maxPct, pct));
+      setSplitLeftPct(Number.isFinite(clamped) ? clamped : 40);
     }
     function onUp() { setIsResizing(false); }
     window.addEventListener("mousemove", onMove);
@@ -359,6 +389,9 @@ export function App() {
         mediaDurationSec: typeof data.mediaDurationSec === "number" ? data.mediaDurationSec : prev.mediaDurationSec,
         transcribedSec: typeof data.transcribedSec === "number" ? data.transcribedSec : prev.transcribedSec,
         phase: data.phase ?? prev.phase,
+        percent: typeof data.percent === "number" ? data.percent : prev.percent,
+        etaSec: typeof data.etaSec === "number" || data.etaSec === null ? data.etaSec : prev.etaSec,
+        speedLabel: typeof data.speedLabel === "string" || data.speedLabel === null ? data.speedLabel : prev.speedLabel,
       }));
     }, 1200);
     return () => window.clearInterval(timer);
@@ -379,6 +412,14 @@ export function App() {
     }, 1200);
     return () => window.clearInterval(timer);
   }, [exportState.jobId, exportState.status, downloadedExportJobs]);
+
+  useEffect(() => {
+    if (transcribe.status !== "done" || !transcribe.jobId || !transcribe.transcriptRelPath) return;
+    if (!transcriptPickerRoot) return;
+    if (lastAutoLoadedTranscriptJobId === transcribe.jobId) return;
+    setLastAutoLoadedTranscriptJobId(transcribe.jobId);
+    void loadTranscript(transcriptPickerRoot.id, transcribe.transcriptRelPath, true);
+  }, [transcribe.status, transcribe.jobId, transcribe.transcriptRelPath, transcriptPickerRoot, lastAutoLoadedTranscriptJobId]);
 
   useEffect(() => { setActiveTokenIndex(tokenAtTime(tokens, currentTimeSec)); }, [tokens, currentTimeSec]);
   useEffect(() => {
@@ -428,11 +469,12 @@ export function App() {
   const transcribeProgress = useMemo(() => {
     const duration = transcribe.mediaDurationSec ?? 0;
     const progressSec = transcribe.transcribedSec ?? 0;
-    const pct = duration > 0 ? Math.min(100, Math.max(0, (progressSec / duration) * 100)) : transcribe.status === "done" ? 100 : 0;
+    const derivedPct = duration > 0 ? Math.min(100, Math.max(0, (progressSec / duration) * 100)) : transcribe.status === "done" ? 100 : 0;
+    const pct = typeof transcribe.percent === "number" ? transcribe.percent : derivedPct;
     const elapsedSec = transcribe.startedAt ? Math.max(0, (Date.now() - transcribe.startedAt) / 1000) : 0;
     const speed = elapsedSec > 0 ? progressSec / elapsedSec : 0;
-    const remaining = duration > progressSec && speed > 0 ? (duration - progressSec) / speed : 0;
-    return { pct, speed, remaining, duration, progressSec };
+    const remaining = typeof transcribe.etaSec === "number" ? transcribe.etaSec : (duration > progressSec && speed > 0 ? (duration - progressSec) / speed : 0);
+    return { pct, speed, remaining, duration, progressSec, speedLabel: transcribe.speedLabel };
   }, [transcribe]);
 
   const timingDiffSec = Math.abs(videoDurationSec - transcriptDurationSec);
@@ -468,13 +510,20 @@ export function App() {
     const response = await fetch("/api/settings");
     if (!response.ok) return;
     const data = await response.json();
-    const nextRoots: RootConfig[] = Array.isArray(data.roots) ? data.roots : [];
+    const baseRoots: RootConfig[] = Array.isArray(data.roots) ? data.roots : [];
+    const uploadRoot: RootConfig | null = data.uploadDir ? { id: "__upload__", name: "Uploads", path: String(data.uploadDir) } : null;
+    const transcriptRoot: RootConfig | null = data.transcriptDir ? { id: "__transcripts__", name: "Transcripts", path: String(data.transcriptDir) } : null;
+    const nextRoots: RootConfig[] = uploadRoot ? [...baseRoots, uploadRoot] : baseRoots;
     setRoots(nextRoots);
+    setTranscriptPickerRoot(transcriptRoot);
     setSettingsNeedsSetup(Boolean(data.needsSetup));
     setShowSettings(Boolean(data.needsSetup));
-    setSettingsRootsDraft(nextRoots.length > 0 ? nextRoots.map((r) => ({ name: r.name, path: r.path })) : [{ name: "Media", path: "" }]);
-    setSettingsUploadSubdir(data.uploadSubdir ?? "incoming/uploads");
+    setSettingsRootsDraft(baseRoots.length > 0 ? baseRoots.map((r) => ({ name: r.name, path: r.path })) : [{ name: "Media", path: "" }]);
+    setSettingsUploadDir(data.uploadDir ?? "");
     setSettingsExportDir(data.exportDir ?? "");
+    setSettingsTranscriptDir(data.transcriptDir ?? "");
+    setSettingsProjectsDir(data.projectsDir ?? "");
+    setSettingsExportCacheHours(String(data.exportCacheHours ?? 72));
     setExpandedDirs(new Set(nextRoots.map((r) => `${r.id}:.`)));
     await Promise.all(nextRoots.map((r) => loadDir(r.id, ".")));
     await loadSettingsHealth();
@@ -538,6 +587,29 @@ export function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (!showSettings) return;
+    let cancelled = false;
+    async function checkDraftRoots() {
+      const next: Record<number, "ok" | "missing" | "checking"> = {};
+      settingsRootsDraft.forEach((_, i) => { next[i] = "checking"; });
+      setSettingsDraftRootHealth(next);
+      await Promise.all(settingsRootsDraft.map(async (root, i) => {
+        const p = root.path.trim();
+        if (!p) {
+          next[i] = "missing";
+          return;
+        }
+        const query = new URLSearchParams({ path: p, hidden: "1" }).toString();
+        const response = await fetch(`/api/system/dirs?${query}`);
+        next[i] = response.ok ? "ok" : "missing";
+      }));
+      if (!cancelled) setSettingsDraftRootHealth({ ...next });
+    }
+    void checkDraftRoots();
+    return () => { cancelled = true; };
+  }, [showSettings, settingsRootsDraft]);
+
   async function loadExportCapabilities() {
     const response = await fetch("/api/export/capabilities");
     if (!response.ok) return;
@@ -564,7 +636,7 @@ export function App() {
     const response = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roots: cleaned, uploadSubdir: settingsUploadSubdir, exportDir: settingsExportDir || undefined }),
+      body: JSON.stringify({ roots: cleaned, uploadDir: settingsUploadDir, exportDir: settingsExportDir || undefined, transcriptDir: settingsTranscriptDir || undefined, projectsDir: settingsProjectsDir || undefined, exportCacheHours: Number(settingsExportCacheHours || 72) }),
     });
     if (!response.ok) {
       setSettingsError(await response.text());
@@ -610,13 +682,13 @@ export function App() {
     const query = new URLSearchParams({ root, path: relPath }).toString();
     const response = await fetch(`/api/transcript?${query}`);
     if (!response.ok) {
-      if (!silent) alert(`Failed to load transcript: ${await response.text()}`);
+      if (!silent) setToast(`Failed to load transcript: ${await response.text()}`);
       return false;
     }
     const data = await response.json();
     const nextTokens = normalizeTranscript(data);
     if (nextTokens.length === 0) {
-      if (!silent) alert("No valid transcript tokens found in JSON.");
+      if (!silent) setToast("No valid transcript tokens found in JSON.");
       return false;
     }
     setTokens(nextTokens);
@@ -628,8 +700,9 @@ export function App() {
     return true;
   }
 
-  async function tryAutoLoadTranscript(root: RootName, fileName: string) {
-    const loaded = await loadTranscript(root, `transcripts/${sanitizeBaseName(fileName)}.json`, true);
+  async function tryAutoLoadTranscript(_root: RootName, fileName: string) {
+    if (!transcriptPickerRoot) return;
+    const loaded = await loadTranscript(transcriptPickerRoot.id, `${sanitizeBaseName(fileName)}.json`, true);
     if (loaded) setShowTranscriptPrompt(false);
   }
 
@@ -690,10 +763,14 @@ export function App() {
     setToast(`Loaded project: ${data.projectName || "Project"}`);
   }
 
-  async function saveProject() {
+  async function saveProject(projectNameInput?: string) {
     if (!selectedMedia) return;
-    const proposedName = window.prompt("Project name", currentProjectName || selectedMedia.name.replace(/\.[^.]+$/, "")) ?? "";
-    const projectName = proposedName.trim() || selectedMedia.name.replace(/\.[^.]+$/, "");
+    if (!projectNameInput) {
+      setProjectNameDraft(currentProjectName || selectedMedia.name.replace(/\.[^.]+$/, ""));
+      setShowProjectNameModal(true);
+      return;
+    }
+    const projectName = projectNameInput.trim() || selectedMedia.name.replace(/\.[^.]+$/, "");
     const response = await fetch("/api/project/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -716,6 +793,7 @@ export function App() {
     const data = await response.json();
     setCurrentProjectId(data.projectId ?? null);
     setCurrentProjectName(data.projectName ?? projectName);
+    setShowProjectNameModal(false);
     setToast(`Project saved: ${data.projectName ?? projectName}`);
   }
 
@@ -758,7 +836,7 @@ export function App() {
       return;
     }
 
-    alert("Selected file is not a supported media/transcript file.");
+    setToast("Selected file is not a supported media/transcript file.");
   }
 
   async function openSelectedFile() {
@@ -768,12 +846,17 @@ export function App() {
 
   async function startTranscription() {
     if (!selectedMedia) return;
+    const presetConfig = sttPreset === "fast"
+      ? { model: "tiny", beamSize: 1, vadFilter: true }
+      : sttPreset === "quality"
+        ? { model: "small", beamSize: 5, vadFilter: false }
+        : { model: "base", beamSize: 1, vadFilter: true };
     setShowTranscribeModal(true);
     setTranscribe({ jobId: null, status: "starting", log: [], transcriptRelPath: null, error: null });
     const response = await fetch("/api/transcribe/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, model: "small", device: "cpu" }),
+      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, model: presetConfig.model, device: "cpu", computeType: "int8", beamSize: presetConfig.beamSize, vadFilter: presetConfig.vadFilter }),
     });
     if (!response.ok) {
       setTranscribe({ jobId: null, status: "error", log: [], transcriptRelPath: null, error: await response.text() });
@@ -816,8 +899,8 @@ export function App() {
   }
 
   async function loadLatestTranscript() {
-    if (!selectedMedia) return;
-    await loadTranscript(selectedMedia.root, `transcripts/${sanitizeBaseName(selectedMedia.name)}.json`);
+    if (!selectedMedia || !transcriptPickerRoot) return;
+    await loadTranscript(transcriptPickerRoot.id, `${sanitizeBaseName(selectedMedia.name)}.json`);
   }
 
   async function exportScriptTxt() {
@@ -891,6 +974,22 @@ export function App() {
     if (text) await navigator.clipboard.writeText(text);
   }
 
+  async function deleteFile(root: RootName, relPath: string) {
+    const response = await fetch("/api/files/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root, path: relPath }),
+    });
+    if (!response.ok) {
+      setToast(`Delete failed: ${await response.text()}`);
+      return;
+    }
+    setToast("File deleted");
+    const parentDir = relPath.split("/").slice(0, -1).join("/") || ".";
+    await Promise.all([loadDir(root, "."), loadDir(root, parentDir)]);
+    if (selectedEntry?.root === root && selectedEntry.relPath === relPath) setSelectedEntry(null);
+  }
+
   async function uploadFile(file: File | null) {
     if (!file) return;
     setUploadStatus("uploading");
@@ -903,10 +1002,19 @@ export function App() {
       setUploadStatus(`uploaded: ${data.savedPath ?? data.relPath}`);
       const uploadRoot = String(data.root ?? roots[0]?.id ?? "");
       const uploadDir = String(data.relPath ?? "").split("/").slice(0, -1).join("/") || ".";
+      await Promise.all(roots.map((r) => loadDir(r.id, ".")));
       if (uploadRoot) {
-        await Promise.all([loadDir(uploadRoot, "."), loadDir(uploadRoot, uploadDir)]);
+        await loadDir(uploadRoot, uploadDir);
         setExpandedDirs((prev) => new Set(prev).add(`${uploadRoot}:${uploadDir}`));
-        setSelectedEntry({ root: uploadRoot, relPath: data.relPath, type: "file" });
+        const relPath = String(data.relPath || "");
+        setSelectedEntry({ root: uploadRoot, relPath, type: "file" });
+        if (relPath.toLowerCase().endsWith(".json")) {
+          await loadTranscript(uploadRoot, relPath);
+          setShowTranscriptPrompt(false);
+        } else {
+          await openFileEntry(uploadRoot, relPath);
+          setShowTranscriptPrompt(true);
+        }
       }
     } catch (error) {
       setUploadStatus(`error: ${error instanceof Error ? error.message : "upload failed"}`);
@@ -1077,6 +1185,10 @@ export function App() {
     setDragEndIndex(null);
   }
 
+  const visiblePickerRoots = filePickerIntent === "json"
+    ? (transcriptPickerRoot ? [transcriptPickerRoot] : [])
+    : roots;
+
   function renderTree(root: RootName, relDir: string, depth = 0): React.ReactNode {
     const key = `${root}:${relDir}`;
     const entries = pickerEntriesByDir[key] ?? [];
@@ -1104,25 +1216,29 @@ export function App() {
         })}
         {files.map((entry) => (
           <li key={`${root}:${entry.relPath}`}>
-            <button
-              className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`}
-              onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}
-              onDoubleClick={() => {
-                setSelectedEntry({ root, relPath: entry.relPath, type: "file" });
-                if (filePickerIntent === "json") {
-                  if (!entry.relPath.toLowerCase().endsWith(".json") && !filePickerShowAll) return;
-                  void loadTranscript(root, entry.relPath);
+            <div className="row" style={{ marginBottom: 0, alignItems: "center", gap: 6 }}>
+              <button
+                className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`}
+                onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}
+                onDoubleClick={() => {
+                  setSelectedEntry({ root, relPath: entry.relPath, type: "file" });
+                  if (filePickerIntent === "json") {
+                    if (!entry.relPath.toLowerCase().endsWith(".json") && !filePickerShowAll) return;
+                    void loadTranscript(root, entry.relPath);
+                    setShowFilePickerModal(false);
+                    setFilePickerFromTranscriptPrompt(false);
+                    setShowTranscriptPrompt(false);
+                    return;
+                  }
+                  void openFileEntry(root, entry.relPath);
                   setShowFilePickerModal(false);
-                  setFilePickerFromTranscriptPrompt(false);
-                  setShowTranscriptPrompt(false);
-                  return;
-                }
-                void openFileEntry(root, entry.relPath);
-                setShowFilePickerModal(false);
-              }}
-            >
-              📄 {entry.name}
-            </button>
+                }}
+                style={{ flex: 1 }}
+              >
+                📄 {entry.name}
+              </button>
+              <button title="Delete file" onClick={() => setConfirmDeleteFile({ root, relPath: entry.relPath })}>🗑</button>
+            </div>
           </li>
         ))}
         {loading && <li className="hint">Loading…</li>}
@@ -1138,12 +1254,18 @@ export function App() {
         <div className="hint">Selected: {videoLabel}</div>
         {videoSrc ? (
           activeMediaKind === "video"
-            ? <video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} />
+            ? <div className="videoFrame16x9"><video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} /></div>
             : <audio ref={audioRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} style={{ width: "100%", marginBottom: 10 }} />
-        ) : <button className="videoPlaceholder" title="Click to browse media files" onClick={() => { setFilePickerIntent("media"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); }}>No Media Loaded — click here to select a file</button>}
-        <div className="row">
-          <button title="Browse media files" onClick={() => { setFilePickerIntent("media"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); }}>Browse</button>
-        </div>
+        ) : (
+          <div className="videoPlaceholder">
+            <div className="hint" style={{ marginBottom: 12 }}>No Media Loaded — start here</div>
+            <div className="row" style={{ justifyContent: "center", marginBottom: 0 }}>
+              <button className="onboardingBtn" title="Browse files already on the server" onClick={() => { setFilePickerIntent("media"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); }}>Browse Server Files</button>
+              <button className="onboardingBtn" title="Upload from this device" onClick={() => uploadInputRef.current?.click()}>Upload from Device</button>
+            </div>
+          </div>
+        )}
+        <input ref={uploadInputRef} type="file" accept="video/*,audio/*,.json" style={{ display: "none" }} onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
 
         <label className="toggleRow"><input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />Preview Cuts (skip deleted sections during playback)</label>
 
@@ -1173,26 +1295,39 @@ export function App() {
           )}
         </details>
 
-        <details className="collapsedPanel" open={openLeftPanel === "stt"}>
-          <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "stt" ? null : "stt")); }}>
+        <details className="collapsedPanel sttPanel" open={openLeftPanel === "stt"}>
+          <summary onClick={(e) => { e.preventDefault(); setShowSttPresetMenuInline(false); setOpenLeftPanel((prev) => (prev === "stt" ? null : "stt")); }}>
             <strong>Speech-to-text</strong>
             <span className="hint">Status: {transcribe.status}</span>
           </summary>
-          <div className="hint">Select a local video/audio file, then click Start Whisper STT.</div>
+          <div className="hint">Select a local video/audio file, then run Whisper or load JSON.</div>
           <div className="row">
-            <button onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : "Start Whisper STT"}</button>
-            <button onClick={() => void loadLatestTranscript()} disabled={!selectedMedia}>Load latest transcript</button>
+            <div className="splitBtnWrap">
+              <button className="splitBtnMain" onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : `Run Whisper ${sttPreset === "fast" ? "Fast draft" : sttPreset === "balanced" ? "Balanced" : "Quality"}`}</button>
+              <button className="splitBtnCaret" title="Choose Whisper preset" onClick={() => setShowSttPresetMenuInline((v) => !v)}>▾</button>
+              {showSttPresetMenuInline && (
+                <div className="splitBtnMenu">
+                  <button onClick={() => { setSttPreset("fast"); setShowSttPresetMenuInline(false); }}>Fast draft (tiny)</button>
+                  <button onClick={() => { setSttPreset("balanced"); setShowSttPresetMenuInline(false); }}>Balanced (base)</button>
+                  <button onClick={() => { setSttPreset("quality"); setShowSttPresetMenuInline(false); }}>Quality (small)</button>
+                </div>
+              )}
+            </div>
+            <button title="Browse server files for transcript JSON" onClick={() => { setFilePickerIntent("json"); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); if (transcriptPickerRoot) void loadDir(transcriptPickerRoot.id, "."); }}>Browse JSON</button>
+            <button title="Upload transcript JSON from this device" onClick={() => jsonUploadInputRef.current?.click()}>Upload JSON</button>
+            <input ref={jsonUploadInputRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
           </div>
           <div className="hint">Status: {transcribe.status}{transcribe.phase ? ` (${transcribe.phase})` : ""}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
-          {(transcribe.status === "running" || transcribe.status === "done") && <><progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} /><div className="hint">{transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s{transcribe.status === "running" && ` · ${transcribeProgress.speed.toFixed(2)}x realtime · ETA ${formatEta(transcribeProgress.remaining)}`}</div></>}
+          {(transcribe.status === "running" || transcribe.status === "done") && <><progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} /><div className="hint">{transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s{transcribe.status === "running" && ` · ${(transcribeProgress.speedLabel || `${transcribeProgress.speed.toFixed(2)}x realtime`)} · ETA ${formatEta(transcribeProgress.remaining)}`}</div></>}
           {transcribe.transcriptRelPath && <div className="hint">Output: {transcribe.transcriptRelPath}</div>}
           {(transcribe.status === "running" || transcribe.status === "starting") && !showTranscribeModal && (
-            <div className="hint" title="Whisper is still running in background">Whisper running in background… {transcribeProgress.pct.toFixed(1)}%</div>
+            <div className="hint" title="Whisper is still running in background">Whisper running in background… {transcribeProgress.pct.toFixed(1)}%{transcribe.log.length ? ` · ${String(transcribe.log[transcribe.log.length - 1]).trim().slice(0, 90)}` : ""}</div>
           )}
         </details>
 
         <div className="exportButtonWrap">
           <div className="row" style={{ marginBottom: 0 }}>
+            <button title="Toggle light/dark theme" onClick={() => setIsLightMode((v) => !v)}>{isLightMode ? "🌙" : "☀️"}</button>
             <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
             <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
             <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
@@ -1311,16 +1446,15 @@ export function App() {
       </div>
     </div>
     {showFilePickerModal && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ margin: 0 }}>{filePickerIntent === "json" ? "Select transcript JSON" : "Select media/transcript file"}</h3>
+            <h3 style={{ margin: 0 }}>{filePickerIntent === "json" ? "Select transcript JSON" : "Select media file"}</h3>
             <button title="Close" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>✕</button>
           </div>
           <div className="row">
             {filePickerFromTranscriptPrompt && <button onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); setShowTranscriptPrompt(true); }}>Back</button>}
-            <button onClick={() => void Promise.all(roots.map((r) => loadDir(r.id, ".")))} title="Refresh all configured roots">Refresh roots</button>
-            <button onClick={() => { setShowSettings(true); void loadSettingsHealth(); }} title="Configure storage roots">Settings</button>
+            <button onClick={() => void Promise.all(visiblePickerRoots.map((r) => loadDir(r.id, ".")))} title="Refresh all configured file lists">Refresh files</button>
             <button
               onClick={() => {
                 if (!selectedEntry || selectedEntry.type !== "file") return;
@@ -1339,21 +1473,16 @@ export function App() {
               title={filePickerIntent === "json" ? "Load selected JSON transcript" : "Open selected media/transcript file"}
             >Open selected file</button>
             <label className="toggleRow" style={{ margin: 0 }} title="Show all files, not only expected type"><input type="checkbox" checked={filePickerShowAll} onChange={(e) => setFilePickerShowAll(e.target.checked)} />Show all files</label>
-            <button onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>Close</button>
           </div>
           <div className="path">Selected: {selectedEntry ? `${selectedEntry.root}:/${selectedEntry.relPath === "." ? "" : selectedEntry.relPath}` : "none"}</div>
           <div className="treeRootWrap" style={{ maxHeight: 420 }}>
-            {roots.length === 0 ? <div className="hint">No media roots configured. Open Settings.</div> : roots.map((root) => (
+            <button className="treeCogBtn" title="Configure storage roots" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>⚙️</button>
+            {visiblePickerRoots.length === 0 ? <div className="hint">No folders configured for this picker. Open Settings.</div> : visiblePickerRoots.map((root) => (
               <div key={root.id}>
                 <div className="treeRootHeader">📁 {root.name}</div>
                 {renderTree(root.id, ".")}
               </div>
             ))}
-          </div>
-          <div className="row">
-            <label title="Upload media/transcript into configured upload location">Upload media/transcript:&nbsp;
-              <input type="file" accept="video/*,audio/*,.json,.txt,.vtt,.srt" onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
-            </label>
           </div>
           {pickerError && <div className="error">{pickerError}</div>}
           {uploadStatus !== "idle" && <div className="hint">Upload: {uploadStatus}</div>}
@@ -1362,25 +1491,35 @@ export function App() {
     )}
 
     {showTranscriptPrompt && selectedMedia && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>
+        <div className="settingsModal transcriptSetupModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Transcript setup</h3>
-            <button title="Close" onClick={() => setShowTranscriptPrompt(false)}>✕</button>
+            <button title="Close" onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>✕</button>
           </div>
           <div className="hint">Choose how you want to attach a transcript for {selectedMedia.name}.</div>
           <div className="row">
-            <button title="Run Whisper transcription on selected media" onClick={() => { void startTranscription(); setShowTranscriptPrompt(false); }}>Run Whisper</button>
-            <button title="Pick an existing JSON transcript file" onClick={() => { setFilePickerIntent("json"); setFilePickerShowAll(false); setFilePickerFromTranscriptPrompt(true); setShowTranscriptPrompt(false); setShowFilePickerModal(true); }}>Use JSON transcript…</button>
-            <button onClick={() => setShowTranscriptPrompt(false)}>Skip for now</button>
+            <div className="splitBtnWrap">
+              <button className="splitBtnMain" title="Run Whisper transcription on selected media" onClick={() => { void startTranscription(); setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>Run Whisper {sttPreset === "fast" ? "Fast draft" : sttPreset === "balanced" ? "Balanced" : "Quality"}</button>
+              <button className="splitBtnCaret" title="Choose Whisper preset" onClick={() => setShowSttPresetMenu((v) => !v)}>▾</button>
+              {showSttPresetMenu && (
+                <div className="splitBtnMenu">
+                  <button onClick={() => { setSttPreset("fast"); setShowSttPresetMenu(false); }}>Fast draft (tiny)</button>
+                  <button onClick={() => { setSttPreset("balanced"); setShowSttPresetMenu(false); }}>Balanced (base)</button>
+                  <button onClick={() => { setSttPreset("quality"); setShowSttPresetMenu(false); }}>Quality (small)</button>
+                </div>
+              )}
+            </div>
+            <button title="Pick an existing JSON transcript file" onClick={() => { setFilePickerIntent("json"); setFilePickerShowAll(false); setFilePickerFromTranscriptPrompt(true); setShowTranscriptPrompt(false); setShowFilePickerModal(true); setShowSttPresetMenu(false); if (transcriptPickerRoot) void loadDir(transcriptPickerRoot.id, "."); }}>Use JSON transcript…</button>
+            <button onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>Skip for now</button>
           </div>
         </div>
       </div>
     )}
 
     {showTranscribeModal && (transcribe.status === "running" || transcribe.status === "starting") && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => setShowTranscribeModal(false)}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Whisper transcription in progress</h3>
             <button title="Close" onClick={() => setShowTranscribeModal(false)}>✕</button>
@@ -1395,8 +1534,8 @@ export function App() {
     )}
 
     {showExportModal && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => setShowExportModal(false)}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Export</h3>
             <button title="Close" onClick={() => setShowExportModal(false)}>✕</button>
@@ -1431,8 +1570,8 @@ export function App() {
     )}
 
     {showLoadProjectModal && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => setShowLoadProjectModal(false)}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Load project</h3>
             <button title="Close" onClick={() => setShowLoadProjectModal(false)}>✕</button>
@@ -1460,49 +1599,108 @@ export function App() {
       </div>
     )}
 
+    {confirmDeleteFile && (
+      <div className="settingsOverlay" onClick={() => setConfirmDeleteFile(null)}>
+        <div className="settingsModal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+          <h3>Delete file?</h3>
+          <div className="hint">This will permanently delete:</div>
+          <div className="path">{confirmDeleteFile.root}:/{confirmDeleteFile.relPath}</div>
+          <div className="row">
+            <button onClick={() => setConfirmDeleteFile(null)}>Cancel</button>
+            <button onClick={() => { void deleteFile(confirmDeleteFile.root, confirmDeleteFile.relPath); setConfirmDeleteFile(null); }}>Delete</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showProjectNameModal && (
+      <div className="settingsOverlay" onClick={() => setShowProjectNameModal(false)}>
+        <div className="settingsModal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+          <h3>Save project</h3>
+          <div className="hint">Choose a project name:</div>
+          <input value={projectNameDraft} onChange={(e) => setProjectNameDraft(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
+          <div className="row">
+            <button onClick={() => setShowProjectNameModal(false)}>Cancel</button>
+            <button onClick={() => void saveProject(projectNameDraft)}>Save</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {toast && <div className="toastNotice">{toast}</div>}
 
     {showSettings && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => { if (!settingsNeedsSetup) setShowSettings(false); }}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
             {!settingsNeedsSetup && <button title="Close" onClick={() => setShowSettings(false)}>✕</button>}
           </div>
-          <div className="hint">Configure media roots and output folders.</div>
+          <div className="hint">Set where your media, transcripts, and project files live. Use plain folder names—no technical setup needed.</div>
+          <h4 style={{ margin: "8px 0" }}>Media folders</h4>
           {settingsRootsDraft.map((root, index) => {
-            const health = settingsHealth?.roots?.[index];
+            const healthState = settingsDraftRootHealth[index] ?? "checking";
             return (
             <div key={`root-${index}`} className="row">
-              <input placeholder="Root name" value={root.name} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, name: e.target.value } : r))} />
-              <input placeholder="Absolute folder path" style={{ minWidth: 320, flex: 1 }} value={root.path} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: e.target.value } : r))} />
+              <input placeholder="Media folder name" value={root.name} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, name: e.target.value } : r))} />
+              <input placeholder="Folder path" style={{ minWidth: 320, flex: 1 }} value={root.path} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: e.target.value } : r))} />
               <button onClick={() => void browseForPath((value) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: value } : r)), root.path)}>Browse…</button>
               <button onClick={() => setSettingsRootsDraft((prev) => prev.filter((_, i) => i !== index))} disabled={settingsRootsDraft.length <= 1}>Remove</button>
-              {health && <span className={`healthBadge ${health.readable && health.writable ? "ok" : "warn"}`}>{health.exists ? (health.readable && health.writable ? "RW OK" : health.readable ? "Read-only" : "No access") : "Missing"}</span>}
+              <span className={`healthBadge ${healthState === "ok" ? "ok" : "warn"}`}>{healthState === "checking" ? "Checking…" : healthState === "ok" ? "Folder OK" : "Folder not found"}</span>
             </div>
           );})}
           <div className="row">
-            <button onClick={() => setSettingsRootsDraft((prev) => [...prev, { name: `Media ${prev.length + 1}`, path: "" }])}>Add root</button>
+            <button onClick={() => setSettingsRootsDraft((prev) => [...prev, { name: `Media ${prev.length + 1}`, path: "" }])}>Add media folder</button>
           </div>
-          <div className="row">
-            <label className="hint">Upload subfolder (inside first root)<br /><input value={settingsUploadSubdir} onChange={(e) => setSettingsUploadSubdir(e.target.value)} style={{ minWidth: 280 }} /></label>
-            <label className="hint">Export folder (optional absolute path)<br /><input value={settingsExportDir} onChange={(e) => setSettingsExportDir(e.target.value)} style={{ minWidth: 320 }} placeholder="/path/to/exports" /></label>
-            <button onClick={() => void browseForPath((value) => setSettingsExportDir(value), settingsExportDir)}>Browse export…</button>
-            {settingsHealth?.export && <span className={`healthBadge ${settingsHealth.export.readable && settingsHealth.export.writable ? "ok" : "warn"}`}>{settingsHealth.export.exists ? (settingsHealth.export.readable && settingsHealth.export.writable ? "Export RW OK" : "Export access issue") : "Export missing"}</span>}
+          <h4 style={{ margin: "8px 0" }}>Working folders</h4>
+          <div className="row settingsFolderRow">
+            <input value="Upload" disabled className="settingsKindInput" />
+            <input className="settingsPathInput" value={settingsUploadDir} onChange={(e) => setSettingsUploadDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/uploads" />
+            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsUploadDir(value), settingsUploadDir)}>Browse…</button>
+            {settingsHealth?.upload && <span className={`healthBadge ${settingsHealth.upload.exists && settingsHealth.upload.writable ? "ok" : "warn"}`}>{!settingsHealth.upload.exists ? "Folder missing" : settingsHealth.upload.writable ? "Folder OK" : "Write protected"}</span>}
           </div>
-          {settingsHealth?.upload && <div className="hint">Upload target: {settingsHealth.upload.path} — {settingsHealth.upload.exists ? (settingsHealth.upload.readable && settingsHealth.upload.writable ? "RW OK" : "access issue") : "will be created on upload"}</div>}
-          {settingsError && <div className="error">{settingsError}</div>}
-          <div className="row">
-            <button title="Delete cached rendered video files from export directory" onClick={() => void clearVideoExportCache()}>Clear video export cache</button>
+          <div className="row settingsFolderRow">
+            <input value="Whisper Transcripts" disabled className="settingsKindInput" />
+            <input className="settingsPathInput" value={settingsTranscriptDir} onChange={(e) => setSettingsTranscriptDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/transcripts" />
+            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsTranscriptDir(value), settingsTranscriptDir)}>Browse…</button>
+            {settingsHealth?.transcripts && <span className={`healthBadge ${settingsHealth.transcripts.exists && settingsHealth.transcripts.writable ? "ok" : "warn"}`}>{!settingsHealth.transcripts.exists ? "Folder missing" : settingsHealth.transcripts.writable ? "Folder OK" : "Write protected"}</span>}
+          </div>
+          <div className="row settingsFolderRow">
+            <input value="Project Files" disabled className="settingsKindInput" />
+            <input className="settingsPathInput" value={settingsProjectsDir} onChange={(e) => setSettingsProjectsDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/projects" />
+            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsProjectsDir(value), settingsProjectsDir)}>Browse…</button>
+            {settingsHealth?.projects && <span className={`healthBadge ${settingsHealth.projects.exists && settingsHealth.projects.writable ? "ok" : "warn"}`}>{!settingsHealth.projects.exists ? "Folder missing" : settingsHealth.projects.writable ? "Folder OK" : "Write protected"}</span>}
+          </div>
+          <div className="row settingsFolderRow">
+            <input value="Export Cache" disabled className="settingsKindInput" />
+            <input className="settingsPathInput" value={settingsExportDir} onChange={(e) => setSettingsExportDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/export-cache" />
+            <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsExportDir(value), settingsExportDir)}>Browse…</button>
+            <button className="settingsBrowseBtn clearCacheBtn" title="Delete cached rendered video files from export directory" onClick={() => void clearVideoExportCache()}>Clear cache</button>
+            {settingsHealth?.export && <span className={`healthBadge ${settingsHealth.export.exists && settingsHealth.export.writable ? "ok" : "warn"}`}>{!settingsHealth.export.exists ? "Folder missing" : settingsHealth.export.writable ? "Folder OK" : "Write protected"}</span>}
+          </div>
+          <div className="row" style={{ alignItems: "center" }}>
+            <label className="settingsField" style={{ minWidth: 240 }}>Auto-delete cache after<select value={settingsExportCacheHours} onChange={(e) => setSettingsExportCacheHours(e.target.value)}>
+                <option value="0">Never</option>
+                <option value="24">24h</option>
+                <option value="48">48h</option>
+                <option value="72">72h</option>
+                <option value="168">7d</option>
+                <option value="336">14d</option>
+              </select>
+            </label>
+          </div>
+          {settingsError && <div className="error">{settingsError}</div>
+          }
+          <div className="row" style={{ justifyContent: "flex-end" }}>
             {!settingsNeedsSetup && <button onClick={() => setShowSettings(false)}>Cancel</button>}
-            <button onClick={() => void saveSettings()}>Save settings</button>
+            <button className="saveSettingsBtn" onClick={() => void saveSettings()}>Save settings</button>
           </div>
         </div>
       </div>
     )}
     {showDirPicker && (
-      <div className="settingsOverlay">
-        <div className="settingsModal">
+      <div className="settingsOverlay" onClick={() => setShowDirPicker(false)}>
+        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Select folder</h3>
             <button title="Close" onClick={() => setShowDirPicker(false)}>✕</button>

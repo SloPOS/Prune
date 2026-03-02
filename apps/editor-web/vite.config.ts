@@ -267,6 +267,11 @@ function sanitizeFcpxmlName(raw: string, sourceRelPath: string): string {
   return `${base || "edited"}.fcpxml`;
 }
 
+function sanitizeScriptName(raw: string): string {
+  const base = String(raw || "script").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "script"}.txt`;
+}
+
 function runFfmpeg(job: ExportJob, args: string[]): Promise<number | null> {
   return new Promise((resolve) => {
     const proc = spawn("ffmpeg", args, { cwd: process.cwd() });
@@ -890,6 +895,41 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to fetch export status" }));
+        }
+      });
+
+
+      server.middlewares.use("/api/script/export", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const text = String(body.text ?? "").trim();
+          if (!text) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Script text is empty" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputName = sanitizeScriptName(String(body.outputName ?? "script"));
+          const outputPath = path.join(exportDir, outputName);
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, `${text}\n`, "utf-8");
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ outputPath }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to export script" }));
         }
       });
     },

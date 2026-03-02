@@ -3,8 +3,11 @@ body { font-family: Inter, system-ui, sans-serif; margin: 0; }
 .pane { border: 1px solid #ddd; border-radius: 8px; padding: 12px; min-width: 0; }
 .tokens { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .token { border: 1px solid #aaa; background: #fff; padding: 6px 10px; border-radius: 999px; cursor: pointer; }
+.token.active { background: #e7f0ff; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
 .token.deleted { text-decoration: line-through; background: #fee; border-color: #d55; color: #900; }
 pre { background: #f7f7f7; padding: 8px; border-radius: 6px; max-height: 160px; overflow: auto; }
+details { margin: 8px 0; }
+summary { cursor: pointer; color: #444; }
 
 .browserGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .browserCol { border: 1px solid #e4e4e4; border-radius: 6px; padding: 8px; }

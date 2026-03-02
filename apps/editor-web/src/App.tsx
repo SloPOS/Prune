@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type WordToken } from "@bit-cut/core";
 import { mockTranscript } from "./mockTranscript";
 
@@ -25,6 +25,10 @@ type TranscribeState = {
   log: string[];
   transcriptRelPath: string | null;
   error: string | null;
+  startedAt?: number;
+  mediaDurationSec?: number;
+  transcribedSec?: number;
+  phase?: "queued" | "extracting" | "transcribing" | "finalizing" | "done" | "error";
 };
 
 type ExportState = {
@@ -73,6 +77,26 @@ function normalizeTranscript(input: unknown): WordToken[] {
   return normalized;
 }
 
+function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ${mins % 60}m`;
+  }
+  return `${mins}m ${secs}s`;
+}
+
+function tokenAtTime(tokens: WordToken[], timeSec: number): number {
+  if (tokens.length === 0) return -1;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i]!;
+    if (timeSec >= t.startSec && timeSec <= t.endSec) return i;
+  }
+  return -1;
+}
+
 async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {
   const query = new URLSearchParams({ root, dir: relDir }).toString();
   const response = await fetch(`/api/files?${query}`);
@@ -103,6 +127,10 @@ export function App() {
     error: null,
     log: [],
   });
+  const [currentTimeSec, setCurrentTimeSec] = useState(0);
+  const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
+  const [previewCuts, setPreviewCuts] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [browsers, setBrowsers] = useState<Record<RootName, BrowserState>>({
     inbox: { relDir: ".", entries: [], loading: true, error: null },
@@ -128,6 +156,10 @@ export function App() {
         transcriptRelPath: data.transcriptRelPath ?? null,
         log: Array.isArray(data.log) ? data.log.slice(-12) : prev.log,
         error: data.error ?? null,
+        startedAt: typeof data.startedAt === "number" ? data.startedAt : prev.startedAt,
+        mediaDurationSec: typeof data.mediaDurationSec === "number" ? data.mediaDurationSec : prev.mediaDurationSec,
+        transcribedSec: typeof data.transcribedSec === "number" ? data.transcribedSec : prev.transcribedSec,
+        phase: data.phase ?? prev.phase,
       }));
     }, 1200);
 
@@ -154,12 +186,32 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [exportState.jobId, exportState.status]);
 
+  useEffect(() => {
+    setActiveTokenIndex(tokenAtTime(tokens, currentTimeSec));
+  }, [tokens, currentTimeSec]);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.currentTime = 0;
+    setCurrentTimeSec(0);
+    setActiveTokenIndex(-1);
+  }, [videoSrc]);
+
   const cuts = useMemo(() => cutRangesFromDeletedTokens(tokens, deleted), [deleted, tokens]);
   const durationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
   const keeps = useMemo(() => keepRangesFromCuts(durationSec, cuts), [cuts, durationSec]);
 
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
   const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
+
+  const transcribeProgress = useMemo(() => {
+    const duration = transcribe.mediaDurationSec ?? 0;
+    const progressSec = transcribe.transcribedSec ?? 0;
+    const pct = duration > 0 ? Math.min(100, Math.max(0, (progressSec / duration) * 100)) : transcribe.status === "done" ? 100 : 0;
+    const elapsedSec = transcribe.startedAt ? Math.max(0, (Date.now() - transcribe.startedAt) / 1000) : 0;
+    const speed = elapsedSec > 0 ? progressSec / elapsedSec : 0;
+    const remaining = duration > progressSec && speed > 0 ? (duration - progressSec) / speed : 0;
+    return { pct, speed, remaining, duration, progressSec };
+  }, [transcribe]);
 
   async function loadDir(root: RootName, relDir: string) {
     setBrowsers((prev) => ({ ...prev, [root]: { ...prev[root], loading: true, error: null } }));
@@ -271,6 +323,37 @@ export function App() {
     setExportState((prev) => ({ ...prev, jobId: data.jobId, status: "running", outputPath: data.outputPath ?? null }));
   }
 
+  async function exportResolveFcpxml() {
+    if (!selectedMedia) return;
+
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/fcpxml/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        root: selectedMedia.root,
+        path: selectedMedia.path,
+        outputName: exportName,
+        keepRanges: keeps,
+      }),
+    });
+
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+
+    const data = await response.json();
+    setExportState((prev) => ({
+      ...prev,
+      jobId: data.jobId ?? null,
+      status: "done",
+      outputPath: data.outputPath ?? null,
+      error: null,
+      log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [],
+    }));
+  }
+
   async function loadLatestTranscript() {
     if (!selectedMedia) return;
     const pathGuess = `transcripts/${selectedMedia.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
@@ -286,12 +369,37 @@ export function App() {
     });
   }
 
+  function onVideoTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
+    const el = event.currentTarget;
+    const t = el.currentTime;
+    setCurrentTimeSec(t);
+
+    const idx = tokenAtTime(tokens, t);
+    setActiveTokenIndex(idx);
+
+    if (!previewCuts || cuts.length === 0) return;
+
+    const hitCut = cuts.find((cut) => t >= cut.startSec && t < cut.endSec);
+    if (!hitCut) return;
+
+    const nextKeep = keeps.find((k) => k.sourceStartSec >= hitCut.endSec);
+    const seekTarget = nextKeep ? nextKeep.sourceStartSec + 0.01 : hitCut.endSec + 0.01;
+    if (seekTarget > t) {
+      el.currentTime = seekTarget;
+      setCurrentTimeSec(seekTarget);
+    }
+  }
+
   return (
     <div className="page">
       <div className="pane videoPane">
         <h2>Video</h2>
         <div className="hint">Selected: {videoLabel}</div>
-        <video controls width={640} src={videoSrc} />
+        <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />
+          Preview Cuts (skip deleted sections during playback)
+        </label>
+        <video ref={videoRef} controls width={640} src={videoSrc} onTimeUpdate={onVideoTimeUpdate} />
 
         <h3>Speech-to-text</h3>
         <div className="hint">Select a local video, then click Start Whisper STT.</div>
@@ -303,9 +411,23 @@ export function App() {
             Load latest transcript
           </button>
         </div>
-        <div className="hint">Status: {transcribe.status}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
+        <div className="hint">Status: {transcribe.status}{transcribe.phase ? ` (${transcribe.phase})` : ""}{transcribe.error ? ` — ${transcribe.error}` : ""}</div>
+        {(transcribe.status === "running" || transcribe.status === "done") && (
+          <>
+            <progress max={100} value={transcribeProgress.pct} style={{ width: "100%", height: 12 }} />
+            <div className="hint">
+              {transcribeProgress.pct.toFixed(1)}% · {transcribeProgress.progressSec.toFixed(1)}s / {transcribeProgress.duration.toFixed(1)}s
+              {transcribe.status === "running" && ` · ${transcribeProgress.speed.toFixed(2)}x realtime · ETA ${formatEta(transcribeProgress.remaining)}`}
+            </div>
+          </>
+        )}
         {transcribe.transcriptRelPath && <div className="hint">Output: {transcribe.transcriptRelPath}</div>}
-        {transcribe.log.length > 0 && <pre>{transcribe.log.join("")}</pre>}
+        {transcribe.log.length > 0 && (
+          <details>
+            <summary>Debug logs</summary>
+            <pre>{transcribe.log.join("")}</pre>
+          </details>
+        )}
 
         <h3>Export</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -318,10 +440,18 @@ export function App() {
           <button onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>
             {exportState.status === "running" || exportState.status === "starting" ? "Exporting…" : "Export Edited Video"}
           </button>
+          <button onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>
+            Export Resolve FCPXML
+          </button>
         </div>
         <div className="hint">Status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
         {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
-        {exportState.log.length > 0 && <pre>{exportState.log.join("")}</pre>}
+        {exportState.log.length > 0 && (
+          <details>
+            <summary>Export logs</summary>
+            <pre>{exportState.log.join("")}</pre>
+          </details>
+        )}
 
         <h3>Local file browser</h3>
         <div className="browserGrid">
@@ -354,11 +484,14 @@ export function App() {
       <div className="pane transcriptPane">
         <h2>Transcript (click words to cut)</h2>
         <div className="hint">Load transcript by selecting any .json file or run Whisper above.</div>
+        <div className="hint">Playback: {currentTimeSec.toFixed(2)}s</div>
         <div className="tokens">
-          {tokens.map((t) => {
+          {tokens.map((t, index) => {
             const isDeleted = deleted.has(t.id);
+            const isActive = index === activeTokenIndex;
+            const className = ["token", isDeleted ? "deleted" : "", isActive ? "active" : ""].filter(Boolean).join(" ");
             return (
-              <button key={t.id} onClick={() => toggle(t.id)} className={isDeleted ? "token deleted" : "token"}>
+              <button key={t.id} onClick={() => toggle(t.id)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s`}>
                 {t.text}
               </button>
             );

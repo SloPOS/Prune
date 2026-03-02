@@ -7,6 +7,7 @@ if [[ $# -lt 1 ]]; then
   echo "  name: optional output base name (defaults to input file name without extension)" >&2
   echo "" >&2
   echo "Env overrides:" >&2
+  echo "  STT_BACKEND (default: faster-whisper; options: faster-whisper|whisper-cpp|openvino)" >&2
   echo "  WHISPER_MODEL (default: small)" >&2
   echo "  WHISPER_DEVICE (default: cpu)" >&2
   echo "  WHISPER_COMPUTE_TYPE (default: int8)" >&2
@@ -22,6 +23,7 @@ NAME="${2:-$(basename "${IN_MEDIA%.*}")}"
 AUDIO_DIR="${AUDIO_DIR:-data/audio}"
 TRANSCRIPTS_DIR="${TRANSCRIPTS_DIR:-data/transcripts}"
 
+BACKEND="${STT_BACKEND:-faster-whisper}"
 MODEL="${WHISPER_MODEL:-small}"
 DEVICE="${WHISPER_DEVICE:-cpu}"
 COMPUTE_TYPE="${WHISPER_COMPUTE_TYPE:-int8}"
@@ -35,12 +37,27 @@ JSON_OUT="$TRANSCRIPTS_DIR/$NAME.json"
 echo "[1/2] Extracting mono 16k WAV -> $WAV_OUT"
 bash scripts/extract-audio-wav.sh "$IN_MEDIA" "$WAV_OUT"
 
-echo "[2/2] Running Whisper transcription -> $JSON_OUT"
-python3 scripts/transcribe_whisper.py "$WAV_OUT" \
-  --model "$MODEL" \
-  --device "$DEVICE" \
-  --compute-type "$COMPUTE_TYPE" \
-  --language "$LANGUAGE" \
-  --out "$JSON_OUT"
+echo "[2/2] Running STT backend '$BACKEND' -> $JSON_OUT"
+
+case "$BACKEND" in
+  faster-whisper)
+    python3 scripts/transcribe_whisper.py "$WAV_OUT" \
+      --model "$MODEL" \
+      --device "$DEVICE" \
+      --compute-type "$COMPUTE_TYPE" \
+      --language "$LANGUAGE" \
+      --out "$JSON_OUT"
+    ;;
+  whisper-cpp|openvino)
+    echo "ERROR: STT_BACKEND='$BACKEND' is not wired yet in this script." >&2
+    echo "Use STT_BACKEND=faster-whisper (default) for now." >&2
+    echo "See docs/STT_BACKEND_DECISION.md for migration runbook commands." >&2
+    exit 2
+    ;;
+  *)
+    echo "ERROR: Unknown STT_BACKEND='$BACKEND' (expected faster-whisper|whisper-cpp|openvino)." >&2
+    exit 2
+    ;;
+esac
 
 echo "Done. Transcript JSON: $JSON_OUT"

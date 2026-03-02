@@ -37,6 +37,55 @@ npm run dev -w @bit-cut/editor-web
 
 Then open the Vite URL. Click transcript words to mark them deleted and inspect generated cut/keep ranges.
 
+## Whisper transcription runner
+
+This repo includes a local Whisper runner (`scripts/transcribe_whisper.py`) plus npm helpers for extracting WAV audio and writing transcript JSON to `data/transcripts/`.
+
+### 1) Install Python dependency
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+npm run transcribe:install
+```
+
+### 2) Extract audio only (manual)
+
+```bash
+npm run transcribe:extract -- data/source/my-video.mp4 data/audio/my-video.wav
+```
+
+### 3) Run Whisper on an existing WAV (manual)
+
+```bash
+npm run transcribe:whisper -- data/audio/my-video.wav --out data/transcripts/my-video.json
+```
+
+### 4) One-command flow (recommended)
+
+```bash
+npm run transcribe:media -- data/source/my-video.mp4
+```
+
+This will:
+- extract mono 16k WAV to `data/audio/<name>.wav`
+- run `scripts/transcribe_whisper.py`
+- write transcript JSON to `data/transcripts/<name>.json`
+
+You can optionally override model/runtime settings:
+
+```bash
+WHISPER_MODEL=medium WHISPER_LANGUAGE=en npm run transcribe:media -- data/source/my-video.mp4 episode-01
+```
+
+Supported env overrides:
+- `WHISPER_MODEL` (default `small`)
+- `WHISPER_DEVICE` (default `cpu`)
+- `WHISPER_COMPUTE_TYPE` (default `int8`)
+- `WHISPER_LANGUAGE` (default `en`)
+- `AUDIO_DIR` (default `data/audio`)
+- `TRANSCRIPTS_DIR` (default `data/transcripts`)
+
 ## Immediate next steps
 
 See `docs/PHASE-1-PLAN.md`.

@@ -9,6 +9,11 @@
   "scripts": {
     "build": "echo 'TODO: build'",
     "dev": "echo 'TODO: dev'",
-    "test": "echo 'TODO: test'"
+    "test": "echo 'TODO: test'",
+    "transcribe:install": "python3 -m pip install -r scripts/requirements.txt",
+    "transcribe:extract": "bash scripts/extract-audio-wav.sh",
+    "transcribe:whisper": "python3 scripts/transcribe_whisper.py",
+    "transcribe:media": "bash scripts/run-whisper-transcription.sh",
+    "media-api": "node apps/media-api/server.js"
   }
 }

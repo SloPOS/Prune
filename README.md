@@ -86,6 +86,32 @@ Supported env overrides:
 - `AUDIO_DIR` (default `data/audio`)
 - `TRANSCRIPTS_DIR` (default `data/transcripts`)
 
+## Media file API (safe listing)
+
+Run:
+
+```bash
+npm run media-api
+```
+
+Default port: `3199` (`PORT` env var overrides).
+
+Routes:
+- `GET /health`
+- `GET /api/roots`
+- `GET /api/media?root=inbox|archive&dir=<relative>&recursive=0|1&limit=200`
+
+Behavior:
+- only two hardcoded roots are allowed:
+  - `/home/bit/.openclaw/workspace/inbox`
+  - `/mnt/video-archive`
+- path traversal is blocked by resolving + validating relative paths
+- hidden files/dirs are skipped
+- media extension allowlist is enforced
+- transcript discovery checks, in order:
+  - `<basename>.transcript.json`
+  - `<basename>.json`
+
 ## Immediate next steps
 
 See `docs/PHASE-1-PLAN.md`.

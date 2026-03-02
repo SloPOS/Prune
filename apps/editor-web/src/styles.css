@@ -299,3 +299,29 @@ select {
 .transcriptParagraph { min-height: 320px; max-height: none; overflow: auto; }
 .cleanupPanel { max-height: 100%; overflow: auto; }
 .transcriptSearchRow { align-items: center; }
+
+.suggestionsPanel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f1726;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  margin-bottom: 12px;
+}
+
+.suggestionItem {
+  border: 1px solid #2d3d55;
+  border-radius: 8px;
+  padding: 8px;
+  background: #121c2e;
+}
+
+.suggestionItem button {
+  margin-top: 6px;
+  font-size: 12px;
+  padding: 6px 8px;
+}

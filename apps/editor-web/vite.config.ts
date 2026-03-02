@@ -806,6 +806,85 @@ function studioApiPlugin(): Plugin {
         }
       });
 
+      server.middlewares.use("/api/analyze/suggest-cuts", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? "inbox") as RootName;
+          const relPath = String(body.path ?? "");
+          const detectBreaths = Boolean(body.detectBreaths ?? true);
+          const detectNoiseClicks = Boolean(body.detectNoiseClicks ?? true);
+          const tokenGaps = Array.isArray(body.tokenGaps) ? body.tokenGaps : [];
+
+          if (!(root in FILE_ROOTS)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (!detectBreaths && !detectNoiseClicks) {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ candidates: [] }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const baseName = path.basename(relPath, path.extname(relPath)).replace(/[^a-zA-Z0-9._-]/g, "_");
+          const wavPath = path.resolve(REPO_ROOT, "data", "audio", `${baseName}.analysis.wav`);
+          fs.mkdirSync(path.dirname(wavPath), { recursive: true });
+
+          if (!fs.existsSync(wavPath) || fs.statSync(wavPath).mtimeMs < fs.statSync(absMedia).mtimeMs) {
+            const extractScript = path.resolve(REPO_ROOT, "scripts", "extract-audio-wav.sh");
+            const ff = spawnSync("bash", [extractScript, absMedia, wavPath], { cwd: REPO_ROOT, encoding: "utf-8" });
+            if (ff.status !== 0) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: "Audio extraction failed", detail: String(ff.stderr || ff.stdout || "") }));
+              return;
+            }
+          }
+
+          const { sampleRate, samples } = parseWavMono16(wavPath);
+          const gaps = tokenGaps
+            .map((gap: any) => ({ startSec: Number(gap.startSec), endSec: Number(gap.endSec) }))
+            .filter((g: any) => Number.isFinite(g.startSec) && Number.isFinite(g.endSec) && g.endSec > g.startSec);
+
+          const candidates: AnalysisCandidate[] = [];
+          if (detectBreaths) candidates.push(...detectBreathCandidates(samples, sampleRate, gaps));
+          if (detectNoiseClicks) candidates.push(...detectNoiseClickCandidates(samples, sampleRate));
+
+          const sorted = candidates
+            .sort((a, b) => a.startSec - b.startSec || b.score - a.score)
+            .slice(0, 300);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            candidates: sorted,
+            summary: {
+              breaths: sorted.filter((c) => c.kind === "breath").length,
+              noiseClicks: sorted.filter((c) => c.kind === "noise_click").length,
+            },
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to run analysis" }));
+        }
+      });
+
       server.middlewares.use("/api/media", async (req, res) => {
         const send = (code: number, msg: string) => {
           res.statusCode = code;

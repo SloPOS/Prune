@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://github.com/SloPOS/Prune" target="_blank">
-    <img src="docs/screenshots/prune-logo.jpg" alt="Prune logo" width="220" />
+    <img src="docs/screenshots/PruneLogoFull.png" alt="Prune logo" width="220" />
   </a>
 
   # Prune

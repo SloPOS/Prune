@@ -33,6 +33,7 @@ body {
   margin: 0;
   background: radial-gradient(circle at top, color-mix(in srgb, var(--accent) 10%, var(--bg) 90%) 0%, var(--bg) 40%);
   color: var(--text);
+  overflow-x: hidden;
 }
 
 .page {
@@ -40,6 +41,8 @@ body {
   gap: 0;
   padding: 14px;
   height: 100vh;
+  width: 100vw;
+  max-width: 100vw;
   overflow: hidden;
 }
 
@@ -166,6 +169,11 @@ button {
 button:hover {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-soft) 76%);
 }
 
 button:active {
@@ -444,41 +452,163 @@ select {
 @media (orientation: portrait) and (max-width: 1100px), (max-width: 900px) {
   .page {
     grid-template-columns: 1fr !important;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: 1fr;
     padding: 10px;
+    padding-bottom: 78px;
     gap: 8px;
     height: 100dvh;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 
   .mobilePaneSwitch {
     display: flex;
-    grid-column: 1 / -1;
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    margin-bottom: 0;
-    background: color-mix(in srgb, var(--bg) 84%, transparent);
-    backdrop-filter: blur(4px);
-    padding: 4px;
-    border-radius: 10px;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 60;
+    margin: 0;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(8px);
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
   }
 
   .mobilePaneSwitch button {
     flex: 1;
     min-height: 42px;
+    font-size: 12px;
+    padding: 8px 6px;
+  }
+
+  .mobilePaneSwitch .appMenuBtn {
+    flex: 0 0 46px;
+    min-width: 46px;
   }
 
   .mobileLayout .splitHandle { display: none; }
-  .mobileLayout.mobile-video .transcriptPane { display: none; }
-  .mobileLayout.mobile-transcript .videoPane { display: none; }
+
+  .mobileLayout.mobile-media .transcriptPane,
+  .mobileLayout.mobile-export .transcriptPane,
+  .mobileLayout.mobile-tools .transcriptPane {
+    display: none;
+  }
+
+  .mobileLayout.mobile-transcript .videoPane,
+  .mobileLayout.mobile-tools .videoPane,
+  .mobileLayout.mobile-export .videoPane {
+    display: none;
+  }
+
+  .mobileLayout.mobile-tools .transcriptPane,
+  .mobileLayout.mobile-export .videoPane {
+    display: flex;
+  }
+
+  .mobileLayout.mobile-media .mobileToolsSection,
+  .mobileLayout.mobile-media .mobileExportSection {
+    display: none;
+  }
+
+  .mobileLayout.mobile-transcript .mobileToolsSection,
+  .mobileLayout.mobile-transcript .mobileExportSection,
+  .mobileLayout.mobile-tools .mobileTranscriptSection,
+  .mobileLayout.mobile-export .mobileMediaSection,
+  .mobileLayout.mobile-export .mobileToolsSection {
+    display: none;
+  }
 
   .videoPane,
   .transcriptPane {
-    min-width: 0;
-    padding: 10px;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 8px;
+    overflow: auto;
+  }
+
+  .mobileLayout .videoFrame16x9 {
+    max-height: 30vh;
+    margin-bottom: 6px;
+  }
+
+  .mobileLayout .mobileInlinePlayer .videoFrame16x9 {
+    max-height: 24vh;
+  }
+
+  .mobileLayout {
+    overflow-x: hidden;
+  }
+
+  .mobileLayout .row {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .mobileLayout input,
+  .mobileLayout select,
+  .mobileLayout button,
+  .mobileLayout textarea,
+  .mobileLayout .treeRootWrap,
+  .mobileLayout .settingsModal,
+  .mobileLayout .pickerPanel {
+    max-width: 100%;
+  }
+
+  .mobileLayout input[style],
+  .mobileLayout select[style],
+  .mobileLayout button[style] {
+    min-width: 0 !important;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mobileInlinePlayer {
+    margin-bottom: 10px;
+  }
+
+  .mobileLayout .mobileTranscriptSection {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobileLayout .mobileInlinePlayer {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--panel);
+    padding-bottom: 6px;
+  }
+
+  .mobileLayout .transcriptParagraph {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 120px;
   }
 
   .hint { font-size: 12px; }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .mobilePaneSwitch {
+    bottom: 6px;
+    padding: 4px;
+  }
+
+  .mobilePaneSwitch button {
+    min-height: 34px;
+    font-size: 11px;
+  }
+
+  .mobileLayout .videoFrame16x9 {
+    max-height: 42vh;
+  }
 }
 
 .videoPane { overflow: auto; display: flex; flex-direction: column; min-width: 420px; }
@@ -491,12 +621,61 @@ select {
   padding-top: 10px;
 }
 
+.appMenuWrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.appMenuBtn {
+  min-width: 42px;
+}
+
+.appMenuDropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 0;
+  width: max-content;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  z-index: 40;
+}
+
+.appMenuDropdown button {
+  text-align: left;
+  padding: 6px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+  min-height: 34px;
+}
+
+.appMenuDropdown .themeIconOnlyBtn {
+  align-self: flex-end;
+  text-align: center;
+  min-width: 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
 .exportBigButton {
   background: #b32020;
   border-color: #dd5757;
   color: #fff;
   font-weight: 700;
   padding: 10px 18px;
+}
+
+.mobileExportPanel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .transcriptPane { display: flex; flex-direction: column; min-height: 0; min-width: 520px; overflow: hidden; }
 .transcriptParagraph {

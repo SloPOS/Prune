@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Prune favicon">
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#1e5c3b"/>
+
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 46 L34 34" stroke-width="6"/>
+    <path d="M14 18 L34 30" stroke-width="6"/>
+    <path d="M34 30 L50 22" stroke-width="5"/>
+    <path d="M34 34 L50 42" stroke-width="5"/>
+    <circle cx="24" cy="24" r="5" stroke-width="4"/>
+    <circle cx="24" cy="40" r="5" stroke-width="4"/>
+  </g>
+
+  <circle cx="34" cy="32" r="2.5" fill="#ffffff"/>
+</svg>

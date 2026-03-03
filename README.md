@@ -30,6 +30,27 @@ Edit on the go. Our mobile view features a tabbed layout (Media / Transcript / T
 
 ![Prune mobile layout](docs/screenshots/mobile-home.png)
 
+### Mobile App Gallery
+A quick visual sweep of the mobile app across tabs, states, and style variants.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-01.png" alt="Mobile screenshot 01" width="220" /><br /><sub>Screenshot 01 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-02.png" alt="Mobile screenshot 02" width="220" /><br /><sub>Screenshot 02 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-03.png" alt="Mobile screenshot 03" width="220" /><br /><sub>Screenshot 03 (placeholder caption)</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-04.png" alt="Mobile screenshot 04" width="220" /><br /><sub>Screenshot 04 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-05.png" alt="Mobile screenshot 05" width="220" /><br /><sub>Screenshot 05 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-06.png" alt="Mobile screenshot 06" width="220" /><br /><sub>Screenshot 06 (placeholder caption)</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-07.png" alt="Mobile screenshot 07" width="220" /><br /><sub>Screenshot 07 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-08.png" alt="Mobile screenshot 08" width="220" /><br /><sub>Screenshot 08 (placeholder caption)</sub></td>
+    <td></td>
+  </tr>
+</table>
+
 ---
 
 ##  Core Features

@@ -392,6 +392,7 @@ export function App() {
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [gallerySelected, setGallerySelected] = useState<Set<string>>(new Set());
+  const [galleryConfirmAction, setGalleryConfirmAction] = useState<null | { type: "download" | "delete" | "deleteSelected"; item?: GalleryItem }>(null);
   const [lastAutoLoadedTranscriptJobId, setLastAutoLoadedTranscriptJobId] = useState<string | null>(null);
   const [filePickerFromTranscriptPrompt, setFilePickerFromTranscriptPrompt] = useState(false);
   const [exportCapabilities, setExportCapabilities] = useState<Array<{ format: string; videoEncoder: string | null; speed: string }>>([]);
@@ -1616,6 +1617,18 @@ export function App() {
     await loadGallery();
   }
 
+  async function confirmGalleryAction() {
+    if (!galleryConfirmAction) return;
+    if (galleryConfirmAction.type === "download" && galleryConfirmAction.item) {
+      downloadGalleryItem(galleryConfirmAction.item);
+    } else if (galleryConfirmAction.type === "delete" && galleryConfirmAction.item) {
+      await deleteGalleryItem(galleryConfirmAction.item);
+    } else if (galleryConfirmAction.type === "deleteSelected") {
+      await deleteSelectedGalleryItems();
+    }
+    setGalleryConfirmAction(null);
+  }
+
   async function uploadFile(file: File | null) {
     if (!file) return;
     setUploadStatus("uploading");
@@ -2356,7 +2369,7 @@ export function App() {
             <div className="row" style={{ gap: 6 }}>
               <button onClick={() => setGallerySelected(new Set(galleryItems.map((i) => i.id)))} disabled={galleryItems.length === 0}>Select all</button>
               <button onClick={() => setGallerySelected(new Set())} disabled={gallerySelected.size === 0}>Clear</button>
-              <button className="galleryDeleteBtn" onClick={() => void deleteSelectedGalleryItems()} disabled={gallerySelected.size === 0}>🗑 Delete selected</button>
+              <button className="galleryDeleteBtn" onClick={() => setGalleryConfirmAction({ type: "deleteSelected" })} disabled={gallerySelected.size === 0}>🗑 Delete selected</button>
             </div>
           </div>
 
@@ -2388,13 +2401,39 @@ export function App() {
                 <div className="cleanupTitle galleryTitleScroll" style={{ marginTop: 6 }}><span>{item.name}</span></div>
                 <div className="hint">{new Date(item.modifiedAt).toLocaleString()}</div>
                 <div className="hint">{formatDurationShort(item.durationSec)} · {formatBytes(item.sizeBytes)}</div>
-                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                <div className="row galleryActionsRow" style={{ gap: 6, marginTop: 6 }}>
                   <button onClick={() => void openGalleryItem(item)}>Open</button>
-                  <button className="galleryIconBtn" title="Download" aria-label="Download" onClick={() => downloadGalleryItem(item)}>⬇</button>
-                  <button className="galleryIconBtn galleryDeleteBtn" title="Delete" aria-label="Delete" onClick={() => void deleteGalleryItem(item)}>🗑</button>
+                  <div className="galleryActionsRight">
+                    <button className="galleryIconBtn" title="Download" aria-label="Download" onClick={() => setGalleryConfirmAction({ type: "download", item })}>⬇</button>
+                    <button className="galleryIconBtn galleryDeleteBtn" title="Delete" aria-label="Delete" onClick={() => setGalleryConfirmAction({ type: "delete", item })}>🗑</button>
+                  </div>
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {galleryConfirmAction && (
+      <div className="settingsOverlay" onClick={() => setGalleryConfirmAction(null)}>
+        <div className="settingsModal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>{galleryConfirmAction.type === "download" ? "Confirm download" : "Confirm action"}</h3>
+            <button onClick={() => setGalleryConfirmAction(null)}>✕</button>
+          </div>
+          <div className="hint" style={{ marginTop: 8, marginBottom: 12 }}>
+            {galleryConfirmAction.type === "download"
+              ? `Download ${galleryConfirmAction.item?.name || "this file"}?`
+              : galleryConfirmAction.type === "delete"
+                ? `Delete ${galleryConfirmAction.item?.name || "this file"}? This cannot be undone.`
+                : `Delete ${gallerySelected.size} selected file(s)? This cannot be undone.`}
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+            <button onClick={() => setGalleryConfirmAction(null)}>Cancel</button>
+            <button className={galleryConfirmAction.type === "download" ? "" : "galleryDeleteBtn"} onClick={() => void confirmGalleryAction()}>
+              {galleryConfirmAction.type === "download" ? "Download" : "Delete"}
+            </button>
           </div>
         </div>
       </div>

@@ -1241,6 +1241,17 @@ button.settingsActionHalf {
   object-fit: cover;
 }
 
+.galleryActionsRow {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.galleryActionsRight {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .galleryIconBtn {
   min-width: 34px;
   width: 34px;

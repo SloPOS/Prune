@@ -1608,28 +1608,33 @@ function studioApiPlugin(): Plugin {
           for (const target of targets) {
             const files = walk(target.dir);
             for (const absPath of files) {
-              const relPath = path.relative(target.dir, absPath);
-              const stat = fs.statSync(absPath);
-              const ext = path.extname(absPath).toLowerCase();
-              const isVideo = [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"].includes(ext);
-              const isAudio = [".mp3", ".wav", ".aac", ".flac", ".ogg", ".opus"].includes(ext);
-              const durationSec = (isVideo || isAudio) ? (probeDurationSec(absPath) ?? null) : null;
-              items.push({
-                id: `${target.root}:${relPath}`,
-                root: target.root,
-                relPath,
-                name: path.basename(absPath),
-                kind: target.kind,
-                sizeBytes: stat.size,
-                modifiedAt: stat.mtime.toISOString(),
-                durationSec,
-                isVideo,
-                isAudio,
-                mediaUrl: `/api/media?${new URLSearchParams({ root: target.root, path: relPath }).toString()}`,
-                thumbUrl: isVideo
-                  ? `/api/gallery/thumb?${new URLSearchParams({ root: target.root, path: relPath, v: String(stat.mtimeMs) }).toString()}`
-                  : null,
-              });
+              try {
+                const relPath = path.relative(target.dir, absPath);
+                const stat = fs.statSync(absPath);
+                const ext = path.extname(absPath).toLowerCase();
+                const isVideo = [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"].includes(ext);
+                const isAudio = [".mp3", ".wav", ".aac", ".flac", ".ogg", ".opus"].includes(ext);
+                const durationSec = (isVideo || isAudio) ? (probeDurationSec(absPath) ?? null) : null;
+                items.push({
+                  id: `${target.root}:${relPath}`,
+                  root: target.root,
+                  relPath,
+                  name: path.basename(absPath),
+                  kind: target.kind,
+                  sizeBytes: stat.size,
+                  modifiedAt: stat.mtime.toISOString(),
+                  durationSec,
+                  isVideo,
+                  isAudio,
+                  mediaUrl: `/api/media?${new URLSearchParams({ root: target.root, path: relPath }).toString()}`,
+                  thumbUrl: isVideo
+                    ? `/api/gallery/thumb?${new URLSearchParams({ root: target.root, path: relPath, v: String(stat.mtimeMs) }).toString()}`
+                    : null,
+                });
+              } catch {
+                // skip files that disappear or fail to probe while listing
+                continue;
+              }
             }
           }
 
@@ -1650,6 +1655,7 @@ function studioApiPlugin(): Plugin {
           res.end(JSON.stringify({ items: filtered.slice(0, limit) }));
         } catch (error) {
           res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to load gallery" }));
         }
       });

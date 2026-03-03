@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@prune/core";
 import pruneLogo from "./assets/prune-logo.jpg";
+import { fetchJsonSafe, formatBytes, formatDurationShort, formatEta, normalizeRunningStatus, startPolling } from "./utils/appRuntime";
 
 type RootName = string;
 type BrowserEntry = {
@@ -209,80 +210,12 @@ function normalizeTranscript(input: unknown): WordToken[] {
     .filter((t): t is WordToken => Boolean(t));
 }
 
-function formatEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "--";
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  return `${mins}m ${secs}s`;
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
-function formatDurationShort(seconds?: number | null): string {
-  if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return "—";
-  const total = Math.floor(Number(seconds));
-  const hh = Math.floor(total / 3600);
-  const mm = Math.floor((total % 3600) / 60);
-  const ss = total % 60;
-  if (hh > 0) return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-  return `${mm}:${String(ss).padStart(2, "0")}`;
-}
-
 function tokenAtTime(tokens: WordToken[], timeSec: number): number {
   for (let i = 0; i < tokens.length; i += 1) {
     const t = tokens[i]!;
     if (timeSec >= t.startSec && timeSec <= t.endSec) return i;
   }
   return -1;
-}
-
-function normalizeRunningStatus<T extends string>(status: T): T {
-  return (status === "queued" ? "running" : status) as T;
-}
-
-async function fetchJsonSafe(url: string) {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().includes("application/json")) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function startPolling(task: () => Promise<void>, intervalMs: number) {
-  let cancelled = false;
-  let inFlight = false;
-
-  const run = async () => {
-    if (cancelled || inFlight) return;
-    inFlight = true;
-    try {
-      await task();
-    } finally {
-      inFlight = false;
-    }
-  };
-
-  void run();
-  const timer = window.setInterval(() => { void run(); }, intervalMs);
-  return () => {
-    cancelled = true;
-    window.clearInterval(timer);
-  };
 }
 
 function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {

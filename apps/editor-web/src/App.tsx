@@ -1553,6 +1553,34 @@ export function App() {
   }, [showRenderPanel, mobileTab]);
 
   useEffect(() => {
+    if (!isMobileLayout) return;
+
+    let lastBackAt = 0;
+    let allowNextBack = false;
+    const guardState = { pruneBackGuard: true, t: Date.now() };
+    window.history.pushState(guardState, "");
+
+    const onPopState = () => {
+      if (allowNextBack) {
+        allowNextBack = false;
+        return;
+      }
+      const now = Date.now();
+      if (now - lastBackAt <= 1800) {
+        allowNextBack = true;
+        window.history.back();
+        return;
+      }
+      lastBackAt = now;
+      setToast("Press back again to exit Prune");
+      window.history.pushState({ pruneBackGuard: true, t: now }, "");
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [isMobileLayout]);
+
+  useEffect(() => {
     if (!showGalleryModal) return;
     void loadGallery();
   }, [showGalleryModal, galleryScope, galleryShowAllFiles, gallerySearch, gallerySort]);

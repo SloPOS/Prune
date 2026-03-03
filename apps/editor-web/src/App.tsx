@@ -2340,14 +2340,14 @@ export function App() {
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <label className="settingsField">Source
-              <select value={galleryScope} onChange={(e) => setGalleryScope(e.target.value as any)}>
+              <select className="galleryControl" value={galleryScope} onChange={(e) => setGalleryScope(e.target.value as any)}>
                 <option value="originals">Originals</option>
                 <option value="exports">Exports</option>
                 <option value="both">Both</option>
               </select>
             </label>
             <label className="settingsField">Sort
-              <select value={gallerySort} onChange={(e) => setGallerySort(e.target.value)}>
+              <select className="galleryControl" value={gallerySort} onChange={(e) => setGallerySort(e.target.value)}>
                 <option value="date_desc">Newest first</option>
                 <option value="date_asc">Oldest first</option>
                 <option value="name_asc">Name A → Z</option>
@@ -2359,10 +2359,9 @@ export function App() {
               </select>
             </label>
             <label className="settingsField" style={{ flex: "1 1 260px" }}>Search
-              <input value={gallerySearch} onChange={(e) => setGallerySearch(e.target.value)} placeholder="Search filename" />
+              <input className="galleryControl" value={gallerySearch} onChange={(e) => setGallerySearch(e.target.value)} placeholder="Search filename" />
             </label>
-            <label className="toggleRow" style={{ margin: 0 }}><input type="checkbox" checked={galleryShowAllFiles} onChange={(e) => setGalleryShowAllFiles(e.target.checked)} />Show all files</label>
-            <button onClick={() => void loadGallery()} disabled={galleryLoading}>Refresh</button>
+            <button className="galleryRefreshBtn" onClick={() => void loadGallery()} disabled={galleryLoading}>Refresh</button>
           </div>
 
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
@@ -2375,6 +2374,8 @@ export function App() {
           </div>
 
           {galleryError && <div className="error" style={{ marginBottom: 8 }}>{galleryError}</div>}
+
+          <label className="toggleRow galleryShowAllRow"><input type="checkbox" checked={galleryShowAllFiles} onChange={(e) => setGalleryShowAllFiles(e.target.checked)} />Show all files</label>
 
           <div className="galleryGrid">
             {galleryItems.map((item) => (

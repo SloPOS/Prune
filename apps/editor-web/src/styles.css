@@ -1255,10 +1255,25 @@ button.settingsActionHalf {
   margin-left: auto;
 }
 
-.galleryIconBtn {
-  min-width: 34px;
-  width: 34px;
+.galleryControl {
+  height: 36px;
+}
+
+.galleryRefreshBtn {
   height: 34px;
+  align-self: flex-end;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.galleryShowAllRow {
+  margin: 0 0 8px 0;
+}
+
+.galleryIconBtn {
+  min-width: 40px;
+  width: 40px;
+  height: 36px;
   padding: 0;
   display: inline-flex;
   align-items: center;

@@ -1272,6 +1272,14 @@ button.settingsActionHalf {
   display: block;
 }
 
+.galleryIconBtn:not(.galleryDeleteBtn) .galleryActionIcon {
+  filter: brightness(1.45) contrast(1.15);
+}
+
+:root[data-theme="light"] .galleryIconBtn:not(.galleryDeleteBtn) .galleryActionIcon {
+  filter: none;
+}
+
 .galleryDeleteBtn .galleryActionIcon {
   filter: invert(1);
 }

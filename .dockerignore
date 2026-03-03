@@ -1,6 +1,37 @@
+# Node + package manager
 node_modules
+**/node_modules
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# VCS + editor
 .git
 .gitignore
-apps/editor-web/dist
-**/*.log
+.github
+.vscode
+.idea
+
+# Local/runtime data (very large + host-specific)
+data
+inbox
+data-sample-probe.json
+
+# Python/env/cache
 .venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# Build outputs
+apps/editor-web/dist
+packages/*/dist
+coverage
+
+# Docs and archives not needed for runtime image
+docs
+archive
+
+# OS/log clutter
+**/*.log
+.DS_Store

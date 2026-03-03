@@ -263,6 +263,20 @@ async function fetchJsonSafe(url: string) {
   }
 }
 
+function startPolling(task: () => Promise<void>, intervalMs: number) {
+  let cancelled = false;
+  const run = async () => {
+    if (cancelled) return;
+    await task();
+  };
+  void run();
+  const timer = window.setInterval(() => { void run(); }, intervalMs);
+  return () => {
+    cancelled = true;
+    window.clearInterval(timer);
+  };
+}
+
 function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {
   if (ranges.length === 0) return [];
   const sorted = ranges
@@ -568,7 +582,7 @@ export function App() {
 
   useEffect(() => {
     if (!transcribe.jobId || (transcribe.status !== "running" && transcribe.status !== "starting")) return;
-    const timer = window.setInterval(async () => {
+    return startPolling(async () => {
       const query = new URLSearchParams({ jobId: transcribe.jobId! }).toString();
       const data = await fetchJsonSafe(`/api/transcribe/status?${query}`);
       if (!data) return;
@@ -587,7 +601,6 @@ export function App() {
         speedLabel: typeof data.speedLabel === "string" || data.speedLabel === null ? data.speedLabel : prev.speedLabel,
       }));
     }, 1200);
-    return () => window.clearInterval(timer);
   }, [transcribe.jobId, transcribe.status]);
 
   useEffect(() => {
@@ -595,14 +608,11 @@ export function App() {
     const shouldRecoverLatest = showExportProgressModal && !exportState.jobId && shouldTrackExport;
     if (!shouldTrackExport) return;
 
-    let mounted = true;
-    const poll = async () => {
-      if (!mounted) return;
-
+    return startPolling(async () => {
       if (exportState.jobId) {
         const query = new URLSearchParams({ jobId: exportState.jobId }).toString();
         const data = await fetchJsonSafe(`/api/export/status?${query}`);
-        if (!mounted || !data) return;
+        if (!data) return;
 
         setExportState((prev) => ({
           ...prev,
@@ -621,7 +631,7 @@ export function App() {
 
       if (!shouldRecoverLatest) return;
       const data = await fetchJsonSafe("/api/export/latest-active");
-      if (!mounted || !data || !data.id) return;
+      if (!data || !data.id) return;
       setExportState((prev) => ({
         ...prev,
         jobId: data.id,
@@ -630,14 +640,7 @@ export function App() {
         error: data.error ?? prev.error ?? null,
         log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
       }));
-    };
-
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, exportState.jobId ? 1200 : 1500);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
+    }, exportState.jobId ? 1200 : 1500);
   }, [showExportProgressModal, exportState.jobId, exportState.status, downloadedExportJobs, autoDownloadWhenReady]);
 
   useEffect(() => {
@@ -691,10 +694,10 @@ export function App() {
   }, [showRenderPanel, isMobileLayout, mobileTab, selectedMedia?.root, selectedMedia?.path]);
 
   useEffect(() => {
-    let mounted = true;
-    const poll = async () => {
+    const intervalMs = globalRenderStatus.status === "running" ? 1500 : 8000;
+    return startPolling(async () => {
       const data = await fetchJsonSafe("/api/export/render-status");
-      if (!mounted || !data || !data.status) return;
+      if (!data || !data.status) return;
       setGlobalRenderStatus({
         jobId: data.jobId ?? null,
         status: data.status,
@@ -707,11 +710,7 @@ export function App() {
         error: data.error,
         lastLog: data.lastLog,
       });
-    };
-    void poll();
-    const intervalMs = globalRenderStatus.status === "running" ? 1500 : 8000;
-    const timer = window.setInterval(() => { void poll(); }, intervalMs);
-    return () => { mounted = false; window.clearInterval(timer); };
+    }, intervalMs);
   }, [globalRenderStatus.status]);
 
   useEffect(() => {

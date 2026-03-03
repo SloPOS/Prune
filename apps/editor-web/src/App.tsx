@@ -6,6 +6,7 @@ import { buildScriptBody, isAudioFile, isVideoFile, mergeTimeRanges, normalizeTo
 import { useScopedMobileModalTab } from "./hooks/useScopedMobileModalTab";
 import { useExportPolling, useTranscribePolling } from "./hooks/useJobPolling";
 import { useRenderStatusPolling } from "./hooks/useRenderStatusPolling";
+import { useMobileFullscreenGuard } from "./hooks/useMobileFullscreenGuard";
 
 type RootName = string;
 type BrowserEntry = {
@@ -282,7 +283,6 @@ export function App() {
   const [showSttPresetMenu, setShowSttPresetMenu] = useState(false);
   const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showGalleryModal, setShowGalleryModal] = useState(false);
   const [galleryScope, setGalleryScope] = useState<"originals" | "exports" | "both">("both");
   const [galleryShowAllFiles, setGalleryShowAllFiles] = useState(false);
@@ -355,6 +355,8 @@ export function App() {
   const exportPreviewRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const prevExportStatusRef = useRef<ExportState["status"]>("idle");
   const prevExportJobIdRef = useRef<string | null>(null);
+
+  const { isFullscreen, toggleMobileFullscreen } = useMobileFullscreenGuard(isMobileLayout, setToast);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("bitcut-theme");
@@ -1335,88 +1337,6 @@ export function App() {
   useScopedMobileModalTab(showTranscribeModal, mobileTab, setTranscribeModalTab);
   useScopedMobileModalTab(showExportModal, mobileTab, setExportModalTab);
   useScopedMobileModalTab(showRenderPanel, mobileTab, setRenderPanelTab);
-
-  const isFullscreenActive = () => {
-    const docAny = document as Document & { webkitFullscreenElement?: Element | null };
-    return Boolean(document.fullscreenElement || docAny.webkitFullscreenElement);
-  };
-
-  async function exitFullscreenSafe() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else {
-        const docAny = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
-        if (docAny.webkitExitFullscreen) await docAny.webkitExitFullscreen();
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  async function toggleMobileFullscreen() {
-    if (!isMobileLayout) return;
-    try {
-      if (isFullscreenActive()) {
-        await exitFullscreenSafe();
-        setToast("Exited fullscreen");
-        return;
-      }
-      const elAny = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
-      if (elAny.requestFullscreen) await elAny.requestFullscreen();
-      else if (elAny.webkitRequestFullscreen) await elAny.webkitRequestFullscreen();
-      setToast("Fullscreen enabled");
-    } catch {
-      setToast("Fullscreen not available on this browser");
-    }
-  }
-
-  useEffect(() => {
-    const onFullscreenChange = () => setIsFullscreen(isFullscreenActive());
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
-    onFullscreenChange();
-    return () => {
-      document.removeEventListener("fullscreenchange", onFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isMobileLayout) return;
-
-    let lastBackAt = 0;
-    let allowNextBack = false;
-    const guardState = { pruneBackGuard: true, t: Date.now() };
-    window.history.pushState(guardState, "");
-
-    const onPopState = () => {
-      if (allowNextBack) {
-        allowNextBack = false;
-        return;
-      }
-
-      if (isFullscreenActive()) {
-        void exitFullscreenSafe();
-        setToast("Exited fullscreen");
-        window.history.pushState({ pruneBackGuard: true, t: Date.now() }, "");
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastBackAt <= 1800) {
-        allowNextBack = true;
-        void exitFullscreenSafe();
-        window.history.back();
-        return;
-      }
-      lastBackAt = now;
-      setToast("Press back again to exit Prune");
-      window.history.pushState({ pruneBackGuard: true, t: now }, "");
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [isMobileLayout]);
 
   useEffect(() => {
     if (!showGalleryModal) return;

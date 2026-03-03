@@ -384,6 +384,7 @@ export function App() {
   const [showSttPresetMenu, setShowSttPresetMenu] = useState(false);
   const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showGalleryModal, setShowGalleryModal] = useState(false);
   const [galleryScope, setGalleryScope] = useState<"originals" | "exports" | "both">("both");
   const [galleryShowAllFiles, setGalleryShowAllFiles] = useState(false);
@@ -1552,6 +1553,51 @@ export function App() {
     }
   }, [showRenderPanel, mobileTab]);
 
+  const isFullscreenActive = () => {
+    const docAny = document as Document & { webkitFullscreenElement?: Element | null };
+    return Boolean(document.fullscreenElement || docAny.webkitFullscreenElement);
+  };
+
+  async function exitFullscreenSafe() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else {
+        const docAny = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
+        if (docAny.webkitExitFullscreen) await docAny.webkitExitFullscreen();
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  async function toggleMobileFullscreen() {
+    if (!isMobileLayout) return;
+    try {
+      if (isFullscreenActive()) {
+        await exitFullscreenSafe();
+        setToast("Exited fullscreen");
+        return;
+      }
+      const elAny = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+      if (elAny.requestFullscreen) await elAny.requestFullscreen();
+      else if (elAny.webkitRequestFullscreen) await elAny.webkitRequestFullscreen();
+      setToast("Fullscreen enabled");
+    } catch {
+      setToast("Fullscreen not available on this browser");
+    }
+  }
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(isFullscreenActive());
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
+    onFullscreenChange();
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isMobileLayout) return;
 
@@ -1565,9 +1611,18 @@ export function App() {
         allowNextBack = false;
         return;
       }
+
+      if (isFullscreenActive()) {
+        void exitFullscreenSafe();
+        setToast("Exited fullscreen");
+        window.history.pushState({ pruneBackGuard: true, t: Date.now() }, "");
+        return;
+      }
+
       const now = Date.now();
       if (now - lastBackAt <= 1800) {
         allowNextBack = true;
+        void exitFullscreenSafe();
         window.history.back();
         return;
       }
@@ -1991,7 +2046,10 @@ export function App() {
             <button className="appMenuBtn" title="Project and settings menu" onClick={() => setShowAppMenu((v) => !v)}>☰</button>
             {showAppMenu && (
               <div className="appMenuDropdown">
-                <button className="themeIconOnlyBtn" title="Toggle light/dark theme" onClick={() => { setIsLightMode((v) => !v); setShowAppMenu(false); }}>{isLightMode ? "🌙" : "☀️"}</button>
+                <div className="appMenuIconRow">
+                  <button className="themeIconOnlyBtn" title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={() => { void toggleMobileFullscreen(); setShowAppMenu(false); }} disabled={!isMobileLayout}>{isFullscreen ? "🗗" : "⛶"}</button>
+                  <button className="themeIconOnlyBtn" title="Toggle light/dark theme" onClick={() => { setIsLightMode((v) => !v); setShowAppMenu(false); }}>{isLightMode ? "🌙" : "☀️"}</button>
+                </div>
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); setShowAppMenu(false); }}>Settings</button>
                 <button title="Save current cut decisions for this media" onClick={() => { void saveProject(); setShowAppMenu(false); }} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); setShowAppMenu(false); }}>Load project</button>

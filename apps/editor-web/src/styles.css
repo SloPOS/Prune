@@ -854,8 +854,13 @@ select {
   min-height: 34px;
 }
 
-.appMenuDropdown .themeIconOnlyBtn {
+.appMenuIconRow {
+  display: inline-flex;
+  gap: 6px;
   align-self: flex-end;
+}
+
+.appMenuDropdown .themeIconOnlyBtn {
   text-align: center;
   min-width: 34px;
   width: 34px;

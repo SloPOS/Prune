@@ -947,10 +947,48 @@ export function App() {
     }
     const data = await response.json();
     if (data.downloadUrl) window.open(data.downloadUrl, "_blank");
-    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}
-`] : [] }));
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
   }
 
+  async function exportAfterEffectsMarkersJson() {
+    if (!selectedMedia) return;
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/after-effects-markers/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, outputName: exportName, keepRanges: keeps }),
+    });
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+    const data = await response.json();
+    if (data.downloadUrl) window.open(data.downloadUrl, "_blank");
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+  }
+
+  async function exportAafScaffold() {
+    if (!selectedMedia) return;
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/aaf/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, outputName: exportName, keepRanges: keeps }),
+    });
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+    const data = await response.json();
+    const limitations = Array.isArray(data.limitations) ? data.limitations : [];
+    setExportState((prev) => ({
+      ...prev,
+      status: data.status === "placeholder" ? "done" : "error",
+      outputPath: data.outputPath ?? null,
+      error: data.status === "placeholder" ? null : "AAF export failed",
+      log: limitations.length ? limitations.map((line: string) => `${line}\n`) : ["AAF scaffold generated (placeholder).\n"],
+    }));
+  }
 
   async function loadLatestTranscript() {
     if (!selectedMedia || !transcriptPickerRoot) return;
@@ -1446,6 +1484,10 @@ export function App() {
                 <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
               </div>
               <div className="row">
+                <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
+                <button title="Create AAF integration scaffold (placeholder JSON)" onClick={() => void exportAafScaffold()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF scaffold (placeholder)</button>
+              </div>
+              <div className="row">
                 <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
                 <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
                 <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
@@ -1698,8 +1740,8 @@ export function App() {
           </div>
           <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
           <div className="row">
-            <button disabled title="Coming soon">Export After Effects markers (coming soon)</button>
-            <button disabled title="Coming soon">Export AAF (coming soon)</button>
+            <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
+            <button title="Create AAF integration scaffold (placeholder JSON)" onClick={() => void exportAafScaffold()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF scaffold (placeholder)</button>
           </div>
           <h4>Subtitles & Script</h4>
           <div className="row">

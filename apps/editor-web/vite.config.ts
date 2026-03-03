@@ -2045,6 +2045,212 @@ function studioApiPlugin(): Plugin {
         }
       });
 
+      server.middlewares.use("/api/export/after-effects-markers/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
+          const relPath = String(body.path ?? "");
+          const outputName = sanitizeAeMarkersName(String(body.outputName ?? ""), relPath);
+          const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
+
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (keepRanges.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid keepRanges/cuts provided" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
+
+          let outputCursor = 0;
+          const markers = keepRanges.flatMap((range, index) => {
+            const durationSec = Math.max(0, range.endSec - range.startSec);
+            const clipIndex = index + 1;
+            const inMarker = {
+              id: `clip-${clipIndex}-in`,
+              name: `Clip ${clipIndex} In`,
+              comment: `Source in for clip ${clipIndex}`,
+              sourceTimeSec: Number(range.startSec.toFixed(6)),
+              outputTimeSec: Number(outputCursor.toFixed(6)),
+            };
+            const outMarker = {
+              id: `clip-${clipIndex}-out`,
+              name: `Clip ${clipIndex} Out`,
+              comment: `Source out for clip ${clipIndex}`,
+              sourceTimeSec: Number(range.endSec.toFixed(6)),
+              outputTimeSec: Number((outputCursor + durationSec).toFixed(6)),
+            };
+            outputCursor += durationSec;
+            return [inMarker, outMarker];
+          });
+
+          const payload = {
+            schemaVersion: 1,
+            generatedAtUtc: new Date().toISOString(),
+            source: {
+              root,
+              path: relPath,
+              fileName: path.basename(absMedia),
+              fps: sourceMetadata.fps,
+              timecode: sourceMetadata.timecode,
+              durationSec: sourceMetadata.durationSec,
+            },
+            note: "JSON marker scaffold for After Effects workflows. Import via script/automation; direct .aep injection is not supported.",
+            markers,
+          };
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+
+          const id = crypto.randomUUID();
+          const job: MarkerExportJob = {
+            id,
+            status: "done",
+            root,
+            relPath,
+            outputPath,
+            outputName,
+            createdAt: Date.now(),
+          };
+          aeMarkerJobs.set(id, job);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            jobId: id,
+            status: job.status,
+            outputPath,
+            downloadUrl: `/api/export/after-effects-markers/download?jobId=${id}`,
+            markerCount: markers.length,
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export After Effects markers" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/after-effects-markers/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = aeMarkerJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download After Effects markers" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/aaf/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
+          const relPath = String(body.path ?? "");
+          const outputName = sanitizeAafName(String(body.outputName ?? ""), relPath);
+          const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
+
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (keepRanges.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid keepRanges/cuts provided" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
+          const payload = {
+            schemaVersion: 1,
+            status: "placeholder",
+            format: "AAF",
+            generatedAtUtc: new Date().toISOString(),
+            source: {
+              root,
+              path: relPath,
+              fileName: path.basename(absMedia),
+            },
+            keepRangeCount: keepRanges.length,
+            limitations: [
+              "This endpoint does not generate a binary .aaf yet.",
+              "Output is a JSON scaffold for integration testing and workflow wiring.",
+              "Track layout, media linking, and AAF essence embedding are not implemented.",
+            ],
+            nextStepHint: "Use FCPXML or EDL for current timeline interchange.",
+          };
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            status: "placeholder",
+            format: "AAF",
+            outputPath,
+            downloadUrl: null,
+            limitations: payload.limitations,
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to create AAF scaffold" }));
+        }
+      });
+
       server.middlewares.use("/api/export/capabilities", async (_req, res) => {
         try {
           const hasQsv = ffmpegHasEncoder("h264_qsv");

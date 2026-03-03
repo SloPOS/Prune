@@ -114,6 +114,12 @@ Routes:
 - `GET /api/media?root=inbox|archive&dir=<relative>&recursive=0|1&limit=200`
 - `POST /api/export/start`
 - `GET /api/export/status?jobId=<uuid>`
+- `POST /api/export/fcpxml/start`
+- `POST /api/export/edl/start`
+- `POST /api/export/premiere/start`
+- `POST /api/export/after-effects-markers/start`
+- `GET /api/export/after-effects-markers/download?jobId=<uuid>`
+- `POST /api/export/aaf/start` (placeholder scaffold status)
 
 Behavior:
 - only two configured roots are allowed (`inbox` and `archive`)
@@ -139,6 +145,8 @@ Export behavior:
 - if that is unavailable, falls back to `data/exports/`
 - encoder prefers `h264_qsv` when available and auto-retries with `libx264` on failure
 - poll `GET /api/export/status?jobId=...` for status/logs/output path
+- After Effects export currently writes a JSON marker scaffold intended for scripting/automation workflows (not direct `.aep` injection)
+- AAF export route currently returns explicit `status: "placeholder"` and writes a JSON scaffold (`.aaf.json`); binary AAF output is not implemented yet
 
 ## Immediate next steps
 

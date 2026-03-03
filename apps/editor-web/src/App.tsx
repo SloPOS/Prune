@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@prune/core";
 import pruneLogo from "./assets/prune-logo.jpg";
-import { fetchJsonSafe, formatBytes, formatDurationShort, formatEta, startPolling } from "./utils/appRuntime";
+import { formatBytes, formatDurationShort, formatEta } from "./utils/appRuntime";
 import { buildScriptBody, isAudioFile, isVideoFile, mergeTimeRanges, normalizeTokens as normalizeTranscript, sanitizeBaseName, tokenAtTime } from "./utils/appMedia";
 import { useScopedMobileModalTab } from "./hooks/useScopedMobileModalTab";
 import { useExportPolling, useTranscribePolling } from "./hooks/useJobPolling";
+import { useRenderStatusPolling } from "./hooks/useRenderStatusPolling";
 
 type RootName = string;
 type BrowserEntry = {
@@ -500,25 +501,7 @@ export function App() {
       .catch(() => setRenderSourceInfo(null));
   }, [showRenderPanel, isMobileLayout, mobileTab, selectedMedia?.root, selectedMedia?.path]);
 
-  useEffect(() => {
-    const intervalMs = globalRenderStatus.status === "running" ? 1500 : 8000;
-    return startPolling(async () => {
-      const data = await fetchJsonSafe("/api/export/render-status");
-      if (!data || !data.status) return;
-      setGlobalRenderStatus({
-        jobId: data.jobId ?? null,
-        status: data.status,
-        outputPath: data.outputPath,
-        outputName: data.outputName,
-        expectedDurationSec: typeof data.expectedDurationSec === "number" ? data.expectedDurationSec : undefined,
-        progressSec: typeof data.progressSec === "number" ? data.progressSec : undefined,
-        percent: typeof data.percent === "number" || data.percent === null ? data.percent : undefined,
-        etaSec: typeof data.etaSec === "number" || data.etaSec === null ? data.etaSec : undefined,
-        error: data.error,
-        lastLog: data.lastLog,
-      });
-    }, intervalMs);
-  }, [globalRenderStatus.status]);
+  useRenderStatusPolling(globalRenderStatus, setGlobalRenderStatus);
 
   useEffect(() => {
     if (transcribe.status !== "done" || !transcribe.jobId || !transcribe.transcriptRelPath) return;

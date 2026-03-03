@@ -247,6 +247,16 @@ function tokenAtTime(tokens: WordToken[], timeSec: number): number {
   return -1;
 }
 
+function normalizeRunningStatus<T extends string>(status: T): T {
+  return (status === "queued" ? "running" : status) as T;
+}
+
+async function fetchJsonSafe(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  return response.json();
+}
+
 function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {
   if (ranges.length === 0) return [];
   const sorted = ranges
@@ -554,12 +564,11 @@ export function App() {
     if (!transcribe.jobId || (transcribe.status !== "running" && transcribe.status !== "starting")) return;
     const timer = window.setInterval(async () => {
       const query = new URLSearchParams({ jobId: transcribe.jobId! }).toString();
-      const response = await fetch(`/api/transcribe/status?${query}`);
-      if (!response.ok) return;
-      const data = await response.json();
+      const data = await fetchJsonSafe(`/api/transcribe/status?${query}`);
+      if (!data) return;
       setTranscribe((prev) => ({
         ...prev,
-        status: data.status === "running" || data.status === "queued" ? "running" : data.status,
+        status: normalizeRunningStatus(data.status),
         transcriptRelPath: data.transcriptRelPath ?? null,
         log: Array.isArray(data.log) ? data.log.slice(-12) : prev.log,
         error: data.error ?? null,
@@ -579,10 +588,9 @@ export function App() {
     if (!exportState.jobId || (exportState.status !== "running" && exportState.status !== "starting")) return;
     const timer = window.setInterval(async () => {
       const query = new URLSearchParams({ jobId: exportState.jobId! }).toString();
-      const response = await fetch(`/api/export/status?${query}`);
-      if (!response.ok) return;
-      const data = await response.json();
-      setExportState((prev) => ({ ...prev, status: data.status === "running" || data.status === "queued" ? "running" : data.status, outputPath: data.outputPath ?? prev.outputPath, error: data.error ?? null, log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log }));
+      const data = await fetchJsonSafe(`/api/export/status?${query}`);
+      if (!data) return;
+      setExportState((prev) => ({ ...prev, status: normalizeRunningStatus(data.status), outputPath: data.outputPath ?? prev.outputPath, error: data.error ?? null, log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log }));
       if (data.status === "done" && data.downloadUrl && exportState.jobId && !downloadedExportJobs.has(exportState.jobId)) {
         if (autoDownloadWhenReady) window.open(data.downloadUrl, "_blank");
         setDownloadedExportJobs((prev) => new Set(prev).add(exportState.jobId!));
@@ -594,14 +602,12 @@ export function App() {
   useEffect(() => {
     if (!(showExportProgressModal && !exportState.jobId && (exportState.status === "starting" || exportState.status === "running"))) return;
     const timer = window.setInterval(async () => {
-      const response = await fetch("/api/export/latest-active");
-      if (!response.ok) return;
-      const data = await response.json();
+      const data = await fetchJsonSafe("/api/export/latest-active");
       if (!data || !data.id) return;
       setExportState((prev) => ({
         ...prev,
         jobId: data.id,
-        status: data.status === "queued" ? "running" : data.status,
+        status: normalizeRunningStatus(data.status),
         outputPath: data.outputPath ?? prev.outputPath,
         error: data.error ?? prev.error ?? null,
         log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
@@ -663,9 +669,7 @@ export function App() {
   useEffect(() => {
     let mounted = true;
     const poll = async () => {
-      const response = await fetch("/api/export/render-status");
-      if (!response.ok) return;
-      const data = await response.json();
+      const data = await fetchJsonSafe("/api/export/render-status");
       if (!mounted || !data || !data.status) return;
       setGlobalRenderStatus({
         jobId: data.jobId ?? null,

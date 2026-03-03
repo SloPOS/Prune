@@ -1008,8 +1008,9 @@ select {
 
 .toastNotice {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  left: 50%;
+  top: max(10px, env(safe-area-inset-top));
+  transform: translateX(-50%);
   background: color-mix(in srgb, #173326 88%, var(--panel) 12%);
   border: 1px solid color-mix(in srgb, #49c783 65%, var(--line) 35%);
   color: #ddf7ea;
@@ -1017,6 +1018,8 @@ select {
   border-radius: 10px;
   z-index: 70;
   box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+  max-width: min(92vw, 680px);
+  text-align: center;
 }
 
 :root[data-theme="light"] .toastNotice {

@@ -611,8 +611,12 @@ function probeMediaDetails(absInput: string) {
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
     const v = streams.find((s: any) => s.codec_type === "video") || {};
     const a = streams.find((s: any) => s.codec_type === "audio") || {};
+    const ext = path.extname(absInput).replace(".", "").toLowerCase();
+    const ffprobeFormat = String(payload?.format?.format_name || "unknown");
+    const primaryFormat = ffprobeFormat.split(",")[0] || ffprobeFormat;
+    const container = ["mp4", "mov", "webm"].includes(ext) ? ext : primaryFormat;
     return {
-      container: String(payload?.format?.format_name || "unknown"),
+      container,
       durationSec: Number(payload?.format?.duration || 0) || 0,
       bitRate: Number(payload?.format?.bit_rate || 0) || 0,
       videoCodec: String(v.codec_name || "unknown"),

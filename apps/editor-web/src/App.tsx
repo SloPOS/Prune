@@ -292,6 +292,7 @@ export function App() {
   const [renderResolution, setRenderResolution] = useState("source");
   const [renderFps, setRenderFps] = useState("source");
   const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
+  const [loadingUiMessage, setLoadingUiMessage] = useState<string | null>(null);
   const [showFilePickerModal, setShowFilePickerModal] = useState(false);
   const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");
   const [filePickerShowAll, setFilePickerShowAll] = useState(false);
@@ -439,7 +440,15 @@ export function App() {
   useEffect(() => {
     if (!showRenderPanel || !selectedMedia) return;
     const query = new URLSearchParams({ root: selectedMedia.root, path: selectedMedia.path }).toString();
-    void fetch(`/api/media/probe?${query}`).then((r) => r.ok ? r.json() : null).then((d) => setRenderSourceInfo(d?.details ?? null)).catch(() => setRenderSourceInfo(null));
+    void fetch(`/api/media/probe?${query}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        const details = d?.details ?? null;
+        setRenderSourceInfo(details);
+        const srcContainer = String(details?.container || "").toLowerCase();
+        if (srcContainer === "mp4" || srcContainer === "mov" || srcContainer === "webm") setRenderContainer(srcContainer);
+      })
+      .catch(() => setRenderSourceInfo(null));
   }, [showRenderPanel, selectedMedia?.root, selectedMedia?.path]);
 
   useEffect(() => {
@@ -734,7 +743,10 @@ export function App() {
   async function tryAutoLoadTranscript(_root: RootName, fileName: string) {
     if (!transcriptPickerRoot) return;
     const loaded = await loadTranscript(transcriptPickerRoot.id, `${sanitizeBaseName(fileName)}.json`, true);
-    if (loaded) setShowTranscriptPrompt(false);
+    if (loaded) {
+      setShowTranscriptPrompt(false);
+      if (isMobileLayout) setMobileTab("transcript");
+    }
   }
 
   function applyLoadedProjectData(data: any) {
@@ -854,6 +866,7 @@ export function App() {
 
     if (isVideoFile(entryName) || isAudioFile(entryName)) {
       const query = new URLSearchParams({ root, path: relPath }).toString();
+      setLoadingUiMessage("Loading media…");
       setVideoSrc(`/api/media?${query}`);
       setActiveMediaKind(isAudioFile(entryName) ? "audio" : "video");
       setVideoLabel(`${root}: ${relPath}`);
@@ -862,8 +875,13 @@ export function App() {
       setTranscribe({ jobId: null, status: "idle", log: [], transcriptRelPath: null, error: null });
       setExportState({ jobId: null, status: "idle", outputPath: null, error: null, log: [] });
       if (!opts?.skipPrompt) setShowTranscriptPrompt(true);
-      if (!opts?.skipAutoTranscript) await tryAutoLoadTranscript(root, entryName);
+      if (!opts?.skipAutoTranscript) {
+        setLoadingUiMessage("Matching transcript…");
+        await tryAutoLoadTranscript(root, entryName);
+      }
+      setLoadingUiMessage("Restoring project…");
       await loadSavedProject(root, relPath);
+      setLoadingUiMessage(null);
       return;
     }
 
@@ -1665,6 +1683,15 @@ export function App() {
 
       </div>
     </div>
+    {loadingUiMessage && (
+      <div className="settingsOverlay" style={{ zIndex: 85 }}>
+        <div className="settingsModal" style={{ maxWidth: 420, textAlign: "center" }}>
+          <div className="spinner" />
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{loadingUiMessage}</div>
+          <div className="hint">Please wait…</div>
+        </div>
+      </div>
+    )}
     {showTranscriptSearchModal && (
       <div className="settingsOverlay" onClick={() => setShowTranscriptSearchModal(false)}>
         <div className="settingsModal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
@@ -1780,10 +1807,12 @@ export function App() {
             <button title="Close" onClick={() => setShowRenderPanel(false)}>✕</button>
           </div>
           <div className="row" style={{ alignItems: "flex-start" }}>
-            <div style={{ flex: 1, minWidth: 260 }}>
-              {videoSrc && (activeMediaKind === "video" ? <div className="videoFrame16x9" style={{ marginBottom: 8 }}><video controls src={videoSrc} /></div> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
-              <div className="hint">Source preview</div>
-            </div>
+            {!isMobileLayout && (
+              <div style={{ flex: 1, minWidth: 260 }}>
+                {videoSrc && (activeMediaKind === "video" ? <div className="videoFrame16x9" style={{ marginBottom: 8 }}><video controls src={videoSrc} /></div> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
+                <div className="hint">Source preview</div>
+              </div>
+            )}
             <div style={{ flex: 1, minWidth: 260 }}>
               <div className="hint" style={{ marginBottom: 6 }}><strong>Source media details</strong></div>
               <div className="row" style={{ marginBottom: 4 }}><span className="hint">Container:</span><strong>{renderSourceInfo?.container || "—"}</strong></div>

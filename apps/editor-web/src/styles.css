@@ -790,6 +790,21 @@ select {
   box-shadow: 0 10px 24px rgba(0,0,0,0.35);
 }
 
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid color-mix(in srgb, var(--line) 60%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  margin: 0 auto 10px;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .settingsField {
   display: inline-flex;
   flex-direction: column;

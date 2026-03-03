@@ -38,6 +38,19 @@ type ExportState = {
   log: string[];
 };
 
+type GlobalRenderStatus = {
+  jobId: string | null;
+  status: "idle" | "running" | "done" | "error";
+  outputPath?: string;
+  outputName?: string;
+  expectedDurationSec?: number;
+  progressSec?: number;
+  percent?: number | null;
+  etaSec?: number | null;
+  error?: string;
+  lastLog?: string;
+};
+
 type ScriptExportState = {
   status: "idle" | "working" | "done" | "error";
   outputPath: string | null;
@@ -81,6 +94,8 @@ type GapSuggestion = {
 
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".m4v"];
 const AUDIO_EXTENSIONS = [".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg", ".opus"];
+const EXPORT_JOB_STORAGE_KEY = "prune-export-job";
+
 const FIXED_SMART_CLEANUP_PHRASES = [
   "um", "uh", "ah", "er", "mm-hmm",
   "like", "basically", "actually", "literally", "seriously", "honestly", "obviously",
@@ -313,6 +328,28 @@ export function App() {
   const [renderFps, setRenderFps] = useState("source");
   const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
   const [mobileRenderSection, setMobileRenderSection] = useState<"video" | "editor" | "subs" | "script">("video");
+  const [desktopRenderSection, setDesktopRenderSection] = useState<"video" | "project" | "subs">("video");
+  const [showExportProgressModal, setShowExportProgressModal] = useState(false);
+  const [notifyWhenRenderReady, setNotifyWhenRenderReady] = useState(true);
+  const [autoDownloadWhenReady, setAutoDownloadWhenReady] = useState(false);
+  const [showInAppNotifyModal, setShowInAppNotifyModal] = useState(false);
+  const [inAppNotifyMessage, setInAppNotifyMessage] = useState("");
+  const [inAppNotifyDownloadUrl, setInAppNotifyDownloadUrl] = useState<string | null>(null);
+  const [faviconAlert, setFaviconAlert] = useState(false);
+  const [exportModalOffset, setExportModalOffset] = useState({ x: 0, y: 0 });
+  const [renderModalOffset, setRenderModalOffset] = useState({ x: 0, y: 0 });
+  const [progressModalOffset, setProgressModalOffset] = useState({ x: 0, y: 0 });
+  const [settingsModalOffset, setSettingsModalOffset] = useState({ x: 0, y: 0 });
+  const [aboutModalOffset, setAboutModalOffset] = useState({ x: 0, y: 0 });
+  const [dirPickerModalOffset, setDirPickerModalOffset] = useState({ x: 0, y: 0 });
+  const [filePickerModalOffset, setFilePickerModalOffset] = useState({ x: 0, y: 0 });
+  const [transcribeModalOffset, setTranscribeModalOffset] = useState({ x: 0, y: 0 });
+  const [transcriptPromptModalOffset, setTranscriptPromptModalOffset] = useState({ x: 0, y: 0 });
+  const [searchModalOffset, setSearchModalOffset] = useState({ x: 0, y: 0 });
+  const [loadProjectModalOffset, setLoadProjectModalOffset] = useState({ x: 0, y: 0 });
+  const [confirmDeleteModalOffset, setConfirmDeleteModalOffset] = useState({ x: 0, y: 0 });
+  const [projectNameModalOffset, setProjectNameModalOffset] = useState({ x: 0, y: 0 });
+  const [draggingModal, setDraggingModal] = useState<null | { key: "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName"; startX: number; startY: number; originX: number; originY: number }>(null);
   const [loadingUiMessage, setLoadingUiMessage] = useState<string | null>(null);
   const [showFilePickerModal, setShowFilePickerModal] = useState(false);
   const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");
@@ -336,7 +373,8 @@ export function App() {
   const [confirmDeleteFile, setConfirmDeleteFile] = useState<{ root: RootName; relPath: string } | null>(null);
   const [showProjectNameModal, setShowProjectNameModal] = useState(false);
   const [projectNameDraft, setProjectNameDraft] = useState("");
-  const [openLeftPanel, setOpenLeftPanel] = useState<"noise" | "stt" | null>(null);
+  const [openLeftPanel, setOpenLeftPanel] = useState<"noise" | "stt" | "renderStatus" | null>(null);
+  const [globalRenderStatus, setGlobalRenderStatus] = useState<GlobalRenderStatus>({ jobId: null, status: "idle" });
   const [subtitleIncludeDeleted, setSubtitleIncludeDeleted] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [activeTokenIndex, setActiveTokenIndex] = useState<number>(-1);
@@ -368,12 +406,34 @@ export function App() {
   const mobileAudioRef = useRef<HTMLAudioElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const jsonUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const exportModalRef = useRef<HTMLDivElement | null>(null);
+  const renderModalRef = useRef<HTMLDivElement | null>(null);
+  const progressModalRef = useRef<HTMLDivElement | null>(null);
+  const settingsModalRef = useRef<HTMLDivElement | null>(null);
+  const aboutModalRef = useRef<HTMLDivElement | null>(null);
+  const dirPickerModalRef = useRef<HTMLDivElement | null>(null);
+  const filePickerModalRef = useRef<HTMLDivElement | null>(null);
+  const transcribeModalRef = useRef<HTMLDivElement | null>(null);
+  const transcriptPromptModalRef = useRef<HTMLDivElement | null>(null);
+  const searchModalRef = useRef<HTMLDivElement | null>(null);
+  const loadProjectModalRef = useRef<HTMLDivElement | null>(null);
+  const confirmDeleteModalRef = useRef<HTMLDivElement | null>(null);
+  const projectNameModalRef = useRef<HTMLDivElement | null>(null);
+  const exportPreviewRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
+  const prevExportStatusRef = useRef<ExportState["status"]>("idle");
+  const prevExportJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("bitcut-theme");
     if (savedTheme === "light") setIsLightMode(true);
     void loadSettingsAndRoots();
     void loadExportCapabilities();
+
+    const savedExportJobId = window.localStorage.getItem(EXPORT_JOB_STORAGE_KEY);
+    if (savedExportJobId) {
+      setExportState((prev) => ({ ...prev, jobId: savedExportJobId, status: "running" }));
+      setShowExportProgressModal(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -423,6 +483,39 @@ export function App() {
   }, [isDraggingTokens, dragStartIndex, dragEndIndex]);
 
   useEffect(() => {
+    if (!draggingModal || isMobileLayout) return;
+    const onMove = (e: MouseEvent) => {
+      const nextX = draggingModal.originX + (e.clientX - draggingModal.startX);
+      const nextY = draggingModal.originY + (e.clientY - draggingModal.startY);
+      const setByKey: Record<string, { ref: HTMLDivElement | null; set: (v: { x: number; y: number }) => void }> = {
+        export: { ref: exportModalRef.current, set: setExportModalOffset },
+        render: { ref: renderModalRef.current, set: setRenderModalOffset },
+        progress: { ref: progressModalRef.current, set: setProgressModalOffset },
+        settings: { ref: settingsModalRef.current, set: setSettingsModalOffset },
+        about: { ref: aboutModalRef.current, set: setAboutModalOffset },
+        dirPicker: { ref: dirPickerModalRef.current, set: setDirPickerModalOffset },
+        filePicker: { ref: filePickerModalRef.current, set: setFilePickerModalOffset },
+        transcribe: { ref: transcribeModalRef.current, set: setTranscribeModalOffset },
+        transcriptPrompt: { ref: transcriptPromptModalRef.current, set: setTranscriptPromptModalOffset },
+        search: { ref: searchModalRef.current, set: setSearchModalOffset },
+        loadProject: { ref: loadProjectModalRef.current, set: setLoadProjectModalOffset },
+        confirmDelete: { ref: confirmDeleteModalRef.current, set: setConfirmDeleteModalOffset },
+        projectName: { ref: projectNameModalRef.current, set: setProjectNameModalOffset },
+      };
+      const target = setByKey[draggingModal.key];
+      if (!target) return;
+      target.set(clampModalOffset(nextX, nextY, target.ref));
+    };
+    const onUp = () => setDraggingModal(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [draggingModal, isMobileLayout]);
+
+  useEffect(() => {
     if (!transcribe.jobId || (transcribe.status !== "running" && transcribe.status !== "starting")) return;
     const timer = window.setInterval(async () => {
       const query = new URLSearchParams({ jobId: transcribe.jobId! }).toString();
@@ -456,12 +549,66 @@ export function App() {
       const data = await response.json();
       setExportState((prev) => ({ ...prev, status: data.status === "running" || data.status === "queued" ? "running" : data.status, outputPath: data.outputPath ?? prev.outputPath, error: data.error ?? null, log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log }));
       if (data.status === "done" && data.downloadUrl && exportState.jobId && !downloadedExportJobs.has(exportState.jobId)) {
-        window.open(data.downloadUrl, "_blank");
+        if (autoDownloadWhenReady) window.open(data.downloadUrl, "_blank");
         setDownloadedExportJobs((prev) => new Set(prev).add(exportState.jobId!));
       }
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [exportState.jobId, exportState.status, downloadedExportJobs]);
+  }, [exportState.jobId, exportState.status, downloadedExportJobs, autoDownloadWhenReady]);
+
+  useEffect(() => {
+    if (!(showExportProgressModal && !exportState.jobId && (exportState.status === "starting" || exportState.status === "running"))) return;
+    const timer = window.setInterval(async () => {
+      const response = await fetch("/api/export/latest-active");
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!data || !data.id) return;
+      setExportState((prev) => ({
+        ...prev,
+        jobId: data.id,
+        status: data.status === "queued" ? "running" : data.status,
+        outputPath: data.outputPath ?? prev.outputPath,
+        error: data.error ?? prev.error ?? null,
+        log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
+      }));
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [showExportProgressModal, exportState.jobId, exportState.status]);
+
+  useEffect(() => {
+    const prevStatus = prevExportStatusRef.current;
+    const prevJobId = prevExportJobIdRef.current;
+    const currentJobId = exportState.jobId;
+    const enteringRun = currentJobId && (exportState.status === "starting" || exportState.status === "running") && (prevStatus !== "starting" && prevStatus !== "running" || prevJobId !== currentJobId);
+    if (enteringRun) setShowExportProgressModal(true);
+
+    if (currentJobId && (exportState.status === "starting" || exportState.status === "running")) {
+      window.localStorage.setItem(EXPORT_JOB_STORAGE_KEY, currentJobId);
+    }
+
+    const finishedSameJob = currentJobId && prevJobId === currentJobId && (prevStatus === "starting" || prevStatus === "running") && (exportState.status === "done" || exportState.status === "error");
+    if (finishedSameJob) {
+      window.localStorage.removeItem(EXPORT_JOB_STORAGE_KEY);
+      if (showExportProgressModal) setShowExportProgressModal(false);
+      if (notifyWhenRenderReady) {
+        const doneUrl = exportState.status === "done" && currentJobId ? `/api/export/download?jobId=${currentJobId}` : null;
+        const msg = exportState.status === "done"
+          ? `Render finished. ${globalRenderStatus.outputName || "Your download is ready."}`
+          : `Render failed${exportState.error ? `: ${exportState.error}` : "."}`;
+        setToast(msg);
+        triggerInAppRenderNotice(msg, doneUrl);
+      }
+    }
+
+    prevExportStatusRef.current = exportState.status;
+    prevExportJobIdRef.current = exportState.jobId;
+  }, [exportState.status, exportState.jobId, exportState.error, notifyWhenRenderReady, showExportProgressModal, globalRenderStatus.outputName]);
+
+  useEffect(() => {
+    const link = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
+    if (!link) return;
+    link.href = faviconAlert ? "/favicon-alert.svg" : "/favicon.svg";
+  }, [faviconAlert]);
 
   useEffect(() => {
     const shouldLoadRenderDetails = Boolean(selectedMedia) && (showRenderPanel || (isMobileLayout && mobileTab === "render"));
@@ -477,6 +624,32 @@ export function App() {
       })
       .catch(() => setRenderSourceInfo(null));
   }, [showRenderPanel, isMobileLayout, mobileTab, selectedMedia?.root, selectedMedia?.path]);
+
+  useEffect(() => {
+    let mounted = true;
+    const poll = async () => {
+      const response = await fetch("/api/export/render-status");
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!mounted || !data || !data.status) return;
+      setGlobalRenderStatus({
+        jobId: data.jobId ?? null,
+        status: data.status,
+        outputPath: data.outputPath,
+        outputName: data.outputName,
+        expectedDurationSec: typeof data.expectedDurationSec === "number" ? data.expectedDurationSec : undefined,
+        progressSec: typeof data.progressSec === "number" ? data.progressSec : undefined,
+        percent: typeof data.percent === "number" || data.percent === null ? data.percent : undefined,
+        etaSec: typeof data.etaSec === "number" || data.etaSec === null ? data.etaSec : undefined,
+        error: data.error,
+        lastLog: data.lastLog,
+      });
+    };
+    void poll();
+    const intervalMs = globalRenderStatus.status === "running" ? 1500 : 8000;
+    const timer = window.setInterval(() => { void poll(); }, intervalMs);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [globalRenderStatus.status]);
 
   useEffect(() => {
     if (transcribe.status !== "done" || !transcribe.jobId || !transcribe.transcriptRelPath) return;
@@ -555,9 +728,42 @@ export function App() {
     return { pct, speed, remaining, duration, progressSec, speedLabel: transcribe.speedLabel };
   }, [transcribe]);
 
+  const approxRenderSeconds = useMemo(() => {
+    const duration = Number(renderSourceInfo?.durationSec || videoDurationSec || totalKeepSec || 0);
+    if (!Number.isFinite(duration) || duration <= 0) return null;
+    const speed = renderCodec === "h265" ? 0.35 : renderCodec === "prores" ? 0.8 : renderCodec === "vp9" ? 0.4 : renderCodec === "vp8" ? 0.7 : 0.9;
+    return Math.max(8, Math.round(duration / speed));
+  }, [renderCodec, renderSourceInfo?.durationSec, totalKeepSec, videoDurationSec]);
+
+  const clampModalOffset = (x: number, y: number, modalEl: HTMLDivElement | null) => {
+    if (!modalEl) return { x, y };
+    const rect = modalEl.getBoundingClientRect();
+    const maxX = Math.max(0, (window.innerWidth - rect.width) / 2 - 12);
+    const maxY = Math.max(0, (window.innerHeight - rect.height) / 2 - 12);
+    return { x: Math.max(-maxX, Math.min(maxX, x)), y: Math.max(-maxY, Math.min(maxY, y)) };
+  };
+
+  const desktopModalStyle = (offset: { x: number; y: number }) => (
+    isMobileLayout ? undefined : { position: "fixed" as const, left: "50%", top: "50%", transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)` }
+  );
+
   const timingDiffSec = Math.abs(videoDurationSec - transcriptDurationSec);
   const timingValid = videoDurationSec > 0 && transcriptDurationSec > 0;
   const timingMatch = timingValid && (timingDiffSec <= 1.25 || timingDiffSec / Math.max(videoDurationSec, 1) < 0.03);
+  const renderStatusLabel = globalRenderStatus.status === "running" ? "Rendering" : globalRenderStatus.status === "done" ? "Finished" : globalRenderStatus.status === "error" ? "Error" : "Idle";
+  const syncedRenderPercent = typeof globalRenderStatus.percent === "number"
+    ? globalRenderStatus.percent
+    : (globalRenderStatus.status === "done" ? 100 : (exportState.status === "running" || exportState.status === "starting" ? 0 : 0));
+  const syncedRenderEtaSec = typeof globalRenderStatus.etaSec === "number"
+    ? globalRenderStatus.etaSec
+    : (approxRenderSeconds ?? null);
+  const syncedRenderStatus = globalRenderStatus.status === "running"
+    ? "running"
+    : globalRenderStatus.status === "done"
+      ? "done"
+      : globalRenderStatus.status === "error"
+        ? "error"
+        : exportState.status;
 
   const phraseMatches = useMemo(() => buildPhraseMatches(tokens), [tokens]);
   const visiblePhraseMatches = useMemo(() => phraseMatches.filter((match) => !ignoredPhrases.has(match.normalizedPhrase)), [phraseMatches, ignoredPhrases]);
@@ -931,6 +1137,73 @@ export function App() {
     await openFileEntry(selectedEntry.root, selectedEntry.relPath);
   }
 
+  function beginModalDrag(key: "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName", event: React.MouseEvent<HTMLDivElement>) {
+    if (isMobileLayout) return;
+    event.preventDefault();
+    const origins: Record<string, { x: number; y: number }> = {
+      export: exportModalOffset,
+      render: renderModalOffset,
+      progress: progressModalOffset,
+      settings: settingsModalOffset,
+      about: aboutModalOffset,
+      dirPicker: dirPickerModalOffset,
+      filePicker: filePickerModalOffset,
+      transcribe: transcribeModalOffset,
+      transcriptPrompt: transcriptPromptModalOffset,
+      search: searchModalOffset,
+      loadProject: loadProjectModalOffset,
+      confirmDelete: confirmDeleteModalOffset,
+      projectName: projectNameModalOffset,
+    };
+    const origin = origins[key] || { x: 0, y: 0 };
+    setDraggingModal({ key, startX: event.clientX, startY: event.clientY, originX: origin.x, originY: origin.y });
+  }
+
+  function playInAppNotifySound() {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const beep = (start: number, freq: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + 0.22);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + 0.24);
+      };
+      beep(0, 880);
+      beep(0.22, 1175);
+      window.setTimeout(() => { try { ctx.close(); } catch {} }, 900);
+    } catch {}
+  }
+
+  function triggerInAppRenderNotice(message: string, downloadUrl?: string | null) {
+    setInAppNotifyMessage(message);
+    setInAppNotifyDownloadUrl(downloadUrl || null);
+    setShowInAppNotifyModal(true);
+    setFaviconAlert(true);
+    playInAppNotifySound();
+  }
+
+  function openRenderProgressFromStatus() {
+    const isDone = globalRenderStatus.status === "done";
+    const downloadUrl = isDone && globalRenderStatus.jobId ? `/api/export/download?jobId=${globalRenderStatus.jobId}` : null;
+    const msg = globalRenderStatus.status === "running"
+      ? `Render is in progress${typeof globalRenderStatus.etaSec === "number" ? ` · ETA ${formatEta(globalRenderStatus.etaSec)}` : ""}.`
+      : globalRenderStatus.status === "done"
+        ? `Render finished. ${globalRenderStatus.outputName || "File is ready."}`
+        : globalRenderStatus.status === "error"
+          ? `Render failed${globalRenderStatus.error ? `: ${globalRenderStatus.error}` : "."}`
+          : "No active render.";
+    setShowExportProgressModal(true);
+    if (globalRenderStatus.jobId) setExportState((prev) => ({ ...prev, jobId: globalRenderStatus.jobId, status: globalRenderStatus.status === "running" ? "running" : prev.status }));
+    if (globalRenderStatus.status === "done" || globalRenderStatus.status === "error") triggerInAppRenderNotice(msg, downloadUrl);
+  }
+
   async function startTranscription() {
     if (!selectedMedia) return;
     const presetConfig = sttPreset === "fast"
@@ -955,6 +1228,7 @@ export function App() {
 
   async function startExport() {
     if (!selectedMedia) return;
+    setShowExportProgressModal(true);
     const resPreset = renderResolution === "2160p" ? { width: 3840, height: 2160 }
       : renderResolution === "1440p" ? { width: 2560, height: 1440 }
       : renderResolution === "1080p" ? { width: 1920, height: 1080 }
@@ -1606,10 +1880,38 @@ export function App() {
       <div className="pane videoPane">
         <div className="mobileMediaSection">
         <div className="videoPaneHeaderRow">
-          <h2>Video</h2>
           <img src={pruneLogo} alt="Prune" className={`panelBrandLogo ${isMobileLayout ? "mobile" : "desktop"}`} />
+          <div className="videoPaneTitleBlock">
+            <h2>Video</h2>
+            <div className="hint videoPaneSubheading">{selectedMedia?.name ? selectedMedia.name.replace(/\.[^.]+$/, "") : "No file selected"}</div>
+          </div>
+          {!isMobileLayout && (
+            <details className="renderStatusWidget" open={openLeftPanel === "renderStatus"}>
+              <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "renderStatus" ? null : "renderStatus")); }}>
+                <div className="renderStatusHead">
+                  <strong>Render status</strong>
+                  <span className="hint">{renderStatusLabel}</span>
+                </div>
+                <progress className="renderStatusBar" max={100} value={typeof globalRenderStatus.percent === "number" ? globalRenderStatus.percent : globalRenderStatus.status === "done" ? 100 : 0} style={{ width: "100%", height: 8 }} />
+              </summary>
+              <div className="renderStatusBody">
+                {globalRenderStatus.status === "running" ? (
+                  <>
+                    <div className="hint">{typeof globalRenderStatus.percent === "number" ? `${globalRenderStatus.percent.toFixed(1)}%` : "Working…"}{typeof globalRenderStatus.etaSec === "number" ? ` · ETA ${formatEta(globalRenderStatus.etaSec)}` : ""}</div>
+                    <div className="hint">Output: <button className="inlineLinkBtn" onClick={() => openRenderProgressFromStatus()}>{globalRenderStatus.outputName || "rendering"}</button></div>
+                  </>
+                ) : globalRenderStatus.status === "done" ? (
+                  <>
+                    <div className="hint">Last output: <button className="inlineLinkBtn" onClick={() => openRenderProgressFromStatus()}>{globalRenderStatus.outputName || "completed render"}</button></div>
+                    {typeof globalRenderStatus.expectedDurationSec === "number" && <div className="hint">Length: {globalRenderStatus.expectedDurationSec.toFixed(1)}s</div>}
+                  </>
+                ) : globalRenderStatus.status === "error" ? (
+                  <div className="error">{globalRenderStatus.error || "Render failed"}</div>
+                ) : <div className="hint">No active render.</div>}
+              </div>
+            </details>
+          )}
         </div>
-        <div className="hint">Selected: {videoLabel}</div>
         {videoSrc ? (
           activeMediaKind === "video"
             ? <div className="videoFrame16x9"><video ref={videoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} /></div>
@@ -1684,6 +1986,29 @@ export function App() {
           )}
         </details>
 
+        {isMobileLayout && (
+          <details className="collapsedPanel mediaOnlyPanel" open={openLeftPanel === "renderStatus"}>
+            <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "renderStatus" ? null : "renderStatus")); }}>
+              <strong>Render status</strong>
+              <span className="hint">{renderStatusLabel}</span>
+            </summary>
+            {globalRenderStatus.status === "running" ? (
+              <>
+                <progress className="renderStatusBar" max={100} value={typeof globalRenderStatus.percent === "number" ? globalRenderStatus.percent : 0} style={{ width: "100%", height: 12 }} />
+                <div className="hint">{typeof globalRenderStatus.percent === "number" ? `${globalRenderStatus.percent.toFixed(1)}%` : "Working…"}{typeof globalRenderStatus.etaSec === "number" ? ` · ETA ${formatEta(globalRenderStatus.etaSec)}` : ""}</div>
+                <div className="hint">Output: <button className="inlineLinkBtn" onClick={() => openRenderProgressFromStatus()}>{globalRenderStatus.outputName || "rendering"}</button></div>
+              </>
+            ) : globalRenderStatus.status === "done" ? (
+              <>
+                <div className="hint">Last output: <button className="inlineLinkBtn" onClick={() => openRenderProgressFromStatus()}>{globalRenderStatus.outputName || "completed render"}</button></div>
+                {typeof globalRenderStatus.expectedDurationSec === "number" && <div className="hint">Length: {globalRenderStatus.expectedDurationSec.toFixed(1)}s</div>}
+              </>
+            ) : globalRenderStatus.status === "error" ? (
+              <div className="error">{globalRenderStatus.error || "Render failed"}</div>
+            ) : <div className="hint">No active render.</div>}
+          </details>
+        )}
+
         <div className="exportButtonWrap mobileExportSection">
           {isMobileLayout ? (
             <div className="mobileExportPanel">
@@ -1752,6 +2077,7 @@ export function App() {
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
                 <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
               </div>
+
               <button className="exportBigButton" title="Review final cut preview and render options" onClick={() => setShowExportModal(true)}>Render</button>
             </>
           )}
@@ -1862,7 +2188,7 @@ export function App() {
           <details className="collapsedPanel" open={openToolPanel === "summary"}>
             <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "summary" ? null : "summary")); }}>
               <strong>Cut/keep summary</strong>
-              <span className="hint">Tokens {tokens.length} · Deleted {deleted.size} · Cuts {cuts.length} ({totalCutSec.toFixed(2)}s) · Keeps {keeps.length} ({totalKeepSec.toFixed(2)}s)</span>
+              <span className="hint">Tokens {tokens.length} · Deleted {deleted.size}</span>
             </summary>
             <ul>
               <li>Tokens: {tokens.length}</li>
@@ -1909,8 +2235,8 @@ export function App() {
     )}
     {showTranscriptSearchModal && (
       <div className="settingsOverlay" onClick={() => setShowTranscriptSearchModal(false)}>
-        <div className="settingsModal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={searchModalRef} className="settingsModal" style={{ maxWidth: 620, ...desktopModalStyle(searchModalOffset) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("search", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Search transcript</h3>
             <button title="Close" onClick={() => setShowTranscriptSearchModal(false)}>✕</button>
           </div>
@@ -1928,8 +2254,8 @@ export function App() {
 
     {showFilePickerModal && (!isMobileLayout || mobileTab === filePickerModalTab) && (
       <div className="settingsOverlay" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={filePickerModalRef} className="settingsModal" style={desktopModalStyle(filePickerModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("filePicker", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>{filePickerIntent === "json" ? "Select transcript JSON" : "Select media file"}</h3>
             <button title="Close" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>✕</button>
           </div>
@@ -1973,8 +2299,8 @@ export function App() {
 
     {showTranscriptPrompt && selectedMedia && (!isMobileLayout || mobileTab === transcriptPromptTab) && (
       <div className="settingsOverlay" onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>
-        <div className="settingsModal transcriptSetupModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={transcriptPromptModalRef} className="settingsModal transcriptSetupModal" style={desktopModalStyle(transcriptPromptModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("transcriptPrompt", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Transcript setup</h3>
             <button title="Close" onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>✕</button>
           </div>
@@ -2000,8 +2326,8 @@ export function App() {
 
     {showTranscribeModal && (transcribe.status === "running" || transcribe.status === "starting") && (!isMobileLayout || mobileTab === transcribeModalTab) && (
       <div className="settingsOverlay" onClick={() => setShowTranscribeModal(false)}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={transcribeModalRef} className="settingsModal" style={desktopModalStyle(transcribeModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("transcribe", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Whisper transcription in progress</h3>
             <button title="Close" onClick={() => setShowTranscribeModal(false)}>✕</button>
           </div>
@@ -2016,8 +2342,8 @@ export function App() {
 
     {showRenderPanel && (!isMobileLayout || mobileTab === renderPanelTab) && (
       <div className="settingsOverlay" onClick={() => setShowRenderPanel(false)}>
-        <div className="settingsModal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={renderModalRef} className="settingsModal" style={{ maxWidth: 760, ...(isMobileLayout ? {} : { position: "fixed", left: "50%", top: "50%", transform: `translate(-50%, -50%) translate(${renderModalOffset.x}px, ${renderModalOffset.y}px)` }) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("render", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Render settings</h3>
             <button title="Close" onClick={() => setShowRenderPanel(false)}>✕</button>
           </div>
@@ -2057,44 +2383,124 @@ export function App() {
 
     {showExportModal && !showRenderPanel && (!isMobileLayout || mobileTab === exportModalTab) && (
       <div className="settingsOverlay" onClick={() => setShowExportModal(false)}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={exportModalRef} className="settingsModal" style={isMobileLayout ? undefined : { position: "fixed", left: "50%", top: "50%", transform: `translate(-50%, -50%) translate(${exportModalOffset.x}px, ${exportModalOffset.y}px)` }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("export", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Render</h3>
             <button title="Close" onClick={() => setShowExportModal(false)}>✕</button>
           </div>
           <div className="hint">Final review and render options.</div>
-          {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
-          <div className="row" style={{ alignItems: "center" }}>
-            <label className="settingsField" style={{ minWidth: 260 }}>Export file name:
-              <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
-            </label>
-            <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
-            <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
-            <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
-            <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
-          </div>
-          <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
-          <div className="row">
-            <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
-            <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF bridge package</button>
-          </div>
-          <h4>Subtitles & Script</h4>
-          <div className="row">
-            <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
-            <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
-            <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
-            <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
-          </div>
+          {!isMobileLayout && videoSrc && (activeMediaKind === "video"
+            ? <video ref={(el) => { exportPreviewRef.current = el; }} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} />
+            : <audio ref={(el) => { exportPreviewRef.current = el; }} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} style={{ width: "100%", marginBottom: 10 }} />)}
+
+          <label className="settingsField" style={{ width: "100%", marginBottom: 8 }}>Export file name
+            <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" title="Base file name for exports" style={{ width: "100%" }} />
+          </label>
+
+          {!isMobileLayout && (
+            <>
+              <details className="collapsedPanel" open={desktopRenderSection === "video"}>
+                <summary onClick={(e) => { e.preventDefault(); setDesktopRenderSection("video"); }}><strong>Video Export</strong></summary>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
+                  <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
+                </div>
+                <div className="row">
+                  <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
+                  <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
+                </div>
+                <div className="row" style={{ marginBottom: 0 }}>
+                  <button title="Render cut media file" onClick={() => { setShowExportModal(false); void startExport(); }} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+                </div>
+                <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
+              </details>
+
+              <details className="collapsedPanel" open={desktopRenderSection === "project"}>
+                <summary onClick={(e) => { e.preventDefault(); setDesktopRenderSection("project"); }}><strong>Project File Export</strong></summary>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
+                  <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
+                </div>
+                <div className="row">
+                  <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
+                  <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
+                </div>
+                <div className="row" style={{ marginBottom: 0 }}>
+                  <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF bridge package</button>
+                </div>
+              </details>
+
+              <details className="collapsedPanel" open={desktopRenderSection === "subs"}>
+                <summary onClick={(e) => { e.preventDefault(); setDesktopRenderSection("subs"); }}><strong>Subtitles/Script Export</strong></summary>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
+                  <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
+                </div>
+                <div className="row" style={{ marginBottom: 0 }}>
+                  <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
+                  <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+                </div>
+              </details>
+            </>
+          )}
+
+          {isMobileLayout && (
+            <>
+              <div className="row" style={{ alignItems: "center" }}>
+                <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+                <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
+              </div>
+              <div className="row">
+                <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
+                <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
+              </div>
+              <div className="row">
+                <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
+                <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
+                <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
+                <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+              </div>
+            </>
+          )}
+
           <div className="hint">Export status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
           {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
         </div>
       </div>
     )}
 
+    {showExportProgressModal && (exportState.status === "starting" || exportState.status === "running") && (
+      <div className="settingsOverlay" onClick={() => setShowExportProgressModal(false)}>
+        <div ref={progressModalRef} className="settingsModal" style={{ maxWidth: 520, ...(isMobileLayout ? {} : { position: "fixed", left: "50%", top: "50%", transform: `translate(-50%, -50%) translate(${progressModalOffset.x}px, ${progressModalOffset.y}px)` }) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("progress", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
+            <h3 style={{ margin: 0 }}>Rendering in progress</h3>
+            <button title="Close" onClick={() => setShowExportProgressModal(false)}>✕</button>
+          </div>
+          <div className="hint">This will keep running even if you clear the current project.</div>
+          <progress className="renderStatusBar" max={100} value={syncedRenderPercent} style={{ width: "100%", height: 12 }} />
+          <div className="hint">Time left: {typeof syncedRenderEtaSec === "number" ? formatEta(syncedRenderEtaSec) : "estimating…"}</div>
+          <div className="hint">Status: {syncedRenderStatus}{!exportState.jobId ? " · initializing render job…" : ""}</div>
+          {globalRenderStatus.lastLog && <div className="hint">{String(globalRenderStatus.lastLog).trim().slice(0, 140)}</div>}
+          {!globalRenderStatus.lastLog && exportState.log.length > 0 && <div className="hint">{String(exportState.log[exportState.log.length - 1]).trim().slice(0, 140)}</div>}
+          <label className="hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={notifyWhenRenderReady} onChange={(e) => setNotifyWhenRenderReady(e.target.checked)} />
+            Notify me when ready (in-app)
+          </label>
+          <label className="hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={autoDownloadWhenReady} onChange={(e) => setAutoDownloadWhenReady(e.target.checked)} />
+            Auto-download when complete
+          </label>
+          <div className="row" style={{ justifyContent: "flex-end", marginBottom: 0 }}>
+            <button onClick={() => setShowExportProgressModal(false)}>Dismiss</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {showLoadProjectModal && (
       <div className="settingsOverlay" onClick={() => setShowLoadProjectModal(false)}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={loadProjectModalRef} className="settingsModal" style={desktopModalStyle(loadProjectModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("loadProject", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Load project</h3>
             <button title="Close" onClick={() => setShowLoadProjectModal(false)}>✕</button>
           </div>
@@ -2123,8 +2529,10 @@ export function App() {
 
     {confirmDeleteFile && (
       <div className="settingsOverlay" onClick={() => setConfirmDeleteFile(null)}>
-        <div className="settingsModal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-          <h3>Delete file?</h3>
+        <div ref={confirmDeleteModalRef} className="settingsModal" style={{ maxWidth: 520, ...desktopModalStyle(confirmDeleteModalOffset) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("confirmDelete", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
+            <h3 style={{ margin: 0 }}>Delete file?</h3>
+          </div>
           <div className="hint">This will permanently delete:</div>
           <div className="path">{confirmDeleteFile.root}:/{confirmDeleteFile.relPath}</div>
           <div className="row">
@@ -2137,8 +2545,10 @@ export function App() {
 
     {showProjectNameModal && (
       <div className="settingsOverlay" onClick={() => setShowProjectNameModal(false)}>
-        <div className="settingsModal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-          <h3>Save project</h3>
+        <div ref={projectNameModalRef} className="settingsModal" style={{ maxWidth: 520, ...desktopModalStyle(projectNameModalOffset) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("projectName", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
+            <h3 style={{ margin: 0 }}>Save project</h3>
+          </div>
           <div className="hint">Choose a project name:</div>
           <input value={projectNameDraft} onChange={(e) => setProjectNameDraft(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
           <div className="row">
@@ -2151,8 +2561,8 @@ export function App() {
 
     {showAboutModal && (
       <div className="settingsOverlay" style={{ zIndex: 220 }} onClick={() => setShowAboutModal(false)}>
-        <div className="settingsModal" style={{ maxWidth: 520, textAlign: "center", position: "relative", zIndex: 221 }} onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={aboutModalRef} className="settingsModal" style={{ maxWidth: 520, textAlign: "center", position: "relative", zIndex: 221, ...desktopModalStyle(aboutModalOffset) }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("about", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>About Prune</h3>
             <button title="Close" onClick={() => setShowAboutModal(false)}>✕</button>
           </div>
@@ -2165,12 +2575,28 @@ export function App() {
       </div>
     )}
 
+    {showInAppNotifyModal && (
+      <div className="settingsOverlay" style={{ zIndex: 230 }} onClick={() => { setShowInAppNotifyModal(false); setFaviconAlert(false); }}>
+        <div className="settingsModal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Render notification</h3>
+            <button onClick={() => { setShowInAppNotifyModal(false); setFaviconAlert(false); }}>✕</button>
+          </div>
+          <div className="hint">{inAppNotifyMessage}</div>
+          <div className="row" style={{ justifyContent: "flex-end", marginBottom: 0 }}>
+            {inAppNotifyDownloadUrl && <button onClick={() => { window.open(inAppNotifyDownloadUrl, "_blank"); setShowInAppNotifyModal(false); setFaviconAlert(false); }}>Download</button>}
+            <button onClick={() => { setShowInAppNotifyModal(false); setFaviconAlert(false); }}>Dismiss</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {toast && <div className="toastNotice">{toast}</div>}
 
     {showSettings && (
       <div className="settingsOverlay" onClick={() => { if (!settingsNeedsSetup) setShowSettings(false); }}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={settingsModalRef} className="settingsModal" style={desktopModalStyle(settingsModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("settings", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 className="settingsTitle" style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
             <div className="row" style={{ marginBottom: 0 }}>
               <button title="About Prune" onClick={() => setShowAboutModal(true)}>About</button>
@@ -2247,17 +2673,23 @@ export function App() {
           </div>
           {settingsError && <div className="error">{settingsError}</div>
           }
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            {!settingsNeedsSetup && <button onClick={() => setShowSettings(false)}>Cancel</button>}
-            <button className="saveSettingsBtn" onClick={() => void saveSettings()}>Save settings</button>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <button onClick={() => {
+              triggerInAppRenderNotice("Test notification from Prune.", null);
+              setToast("Test notification triggered.");
+            }}>Test Notification</button>
+            <div className="row" style={{ marginBottom: 0 }}>
+              {!settingsNeedsSetup && <button onClick={() => setShowSettings(false)}>Cancel</button>}
+              <button className="saveSettingsBtn" onClick={() => void saveSettings()}>Save settings</button>
+            </div>
           </div>
         </div>
       </div>
     )}
     {showDirPicker && (
       <div className="settingsOverlay" onClick={() => setShowDirPicker(false)}>
-        <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div ref={dirPickerModalRef} className="settingsModal" style={desktopModalStyle(dirPickerModalOffset)} onClick={(e) => e.stopPropagation()}>
+          <div className="row" onMouseDown={(e) => beginModalDrag("dirPicker", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>Select folder</h3>
             <button title="Close" onClick={() => setShowDirPicker(false)}>✕</button>
           </div>

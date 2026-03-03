@@ -98,12 +98,63 @@ h2, h3 {
 .videoPaneHeaderRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .videoPaneHeaderRow h2 {
-  margin: 8px 0 6px;
+  margin: 0;
+}
+
+.videoPaneTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.videoPaneSubheading {
+  margin: 0;
+}
+
+.renderStatusWidget {
+  margin-left: auto;
+  min-width: 240px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  padding: 6px 8px;
+}
+
+.renderStatusWidget > summary {
+  display: block;
+  cursor: pointer;
+}
+
+.renderStatusHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.renderStatusBody {
+  margin-top: 6px;
+}
+
+.inlineLinkBtn {
+  background: transparent;
+  border: 0;
+  color: #58c78a;
+  padding: 0;
+  margin: 0;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+:root[data-theme="light"] .inlineLinkBtn {
+  color: #216f48;
 }
 
 .panelBrandLogo {
@@ -118,8 +169,8 @@ h2, h3 {
 }
 
 .panelBrandLogo.mobile {
-  width: 41px;
-  height: 41px;
+  width: 62px;
+  height: 62px;
 }
 
 video {
@@ -1115,6 +1166,29 @@ button.settingsActionHalf {
   border-color: #56b388;
   color: #fff;
   font-weight: 600;
+}
+
+.renderStatusBar {
+  accent-color: #3fbf7f;
+}
+
+.renderStatusBar::-webkit-progress-bar {
+  background: rgba(63, 191, 127, 0.18);
+  border-radius: 999px;
+}
+
+.renderStatusBar::-webkit-progress-value {
+  background: linear-gradient(90deg, #2f8f60 0%, #49c783 100%);
+  border-radius: 999px;
+}
+
+.renderStatusBar::-moz-progress-bar {
+  background: linear-gradient(90deg, #2f8f60 0%, #49c783 100%);
+  border-radius: 999px;
+}
+
+:root[data-theme="light"] .renderStatusBar::-webkit-progress-bar {
+  background: rgba(43, 122, 82, 0.16);
 }
 
 :root[data-theme="light"] .pickerPanel,

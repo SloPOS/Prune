@@ -82,6 +82,24 @@ type ExportJob = {
   exitCode?: number | null;
   error?: string;
   log: string[];
+  expectedDurationSec?: number;
+  progressSec?: number;
+};
+
+type RenderStatusSnapshot = {
+  jobId: string | null;
+  status: "idle" | "running" | "done" | "error";
+  startedAt?: number;
+  endedAt?: number;
+  outputPath?: string;
+  outputName?: string;
+  relPath?: string;
+  expectedDurationSec?: number;
+  progressSec?: number;
+  percent?: number | null;
+  etaSec?: number | null;
+  error?: string;
+  lastLog?: string;
 };
 
 type RangeInput = {
@@ -112,13 +130,29 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
-const edlJobs = new Map<string, EdlExportJob>();
-const premiereXmlJobs = new Map<string, PremiereXmlExportJob>();
-const aeMarkerJobs = new Map<string, MarkerExportJob>();
-const aafBridgeJobs = new Map<string, AafBridgeExportJob>();
 
-function projectsDir(): string {
-  return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || path.resolve(REPO_ROOT, "data", "projects"));
+const RENDER_STATUS_PATH = path.resolve(REPO_ROOT, "data", "render-status.json");
+let latestRenderStatus: RenderStatusSnapshot = (() => {
+  try {
+    if (fs.existsSync(RENDER_STATUS_PATH)) {
+      const raw = fs.readFileSync(RENDER_STATUS_PATH, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed as RenderStatusSnapshot;
+    }
+  } catch {}
+  return { jobId: null, status: "idle" };
+})();
+
+function persistRenderStatus() {
+  try {
+    fs.mkdirSync(path.dirname(RENDER_STATUS_PATH), { recursive: true });
+    fs.writeFileSync(RENDER_STATUS_PATH, JSON.stringify(latestRenderStatus, null, 2));
+  } catch {}
+}
+
+function updateRenderStatus(patch: Partial<RenderStatusSnapshot>) {
+  latestRenderStatus = { ...latestRenderStatus, ...patch };
+  persistRenderStatus();
 }
 
 
@@ -839,11 +873,36 @@ function parseMultipart(req: any): Promise<{ fields: Record<string, string>; fil
 function runFfmpeg(job: ExportJob, args: string[]): Promise<number | null> {
   return new Promise((resolve) => {
     const proc = spawn("ffmpeg", args, { cwd: process.cwd() });
-    proc.stdout.on("data", (d) => pushLog(job, String(d)));
-    proc.stderr.on("data", (d) => pushLog(job, String(d)));
+    proc.stdout.on("data", (d) => {
+      const text = String(d);
+      pushLog(job, text);
+    });
+    proc.stderr.on("data", (d) => {
+      const text = String(d);
+      pushLog(job, text);
+      const sec = parseFfmpegTimeSec(text);
+      if (sec !== undefined) {
+        job.progressSec = Math.max(job.progressSec ?? 0, sec);
+        const expected = job.expectedDurationSec;
+        const percent = expected && expected > 0 ? clampPercent((job.progressSec / expected) * 100) : null;
+        const elapsedSec = Math.max(1, Math.round((Date.now() - job.startedAt) / 1000));
+        const speed = job.progressSec > 0 ? job.progressSec / elapsedSec : 0;
+        const etaSec = expected && speed > 0 ? Math.max(0, Math.round((expected - Math.min(expected, job.progressSec)) / speed)) : null;
+        updateRenderStatus({
+          jobId: job.id,
+          status: "running",
+          progressSec: job.progressSec,
+          expectedDurationSec: expected,
+          percent,
+          etaSec,
+          lastLog: text.trim().slice(-220),
+        });
+      }
+    });
     proc.on("close", (code) => resolve(code));
     proc.on("error", (err) => {
       pushLog(job, `${err.message}\n`);
+      updateRenderStatus({ status: "error", error: err.message, endedAt: Date.now(), lastLog: err.message });
       resolve(1);
     });
   });
@@ -1772,6 +1831,7 @@ function studioApiPlugin(): Plugin {
           const id = crypto.randomUUID();
           const outputPath = path.join(exportDir, outputName);
 
+          const expectedDurationSec = Math.max(0, keepRanges.reduce((sum, r) => sum + Math.max(0, r.endSec - r.startSec), 0));
           const job: ExportJob = {
             id,
             status: "queued",
@@ -1781,10 +1841,27 @@ function studioApiPlugin(): Plugin {
             outputPath,
             startedAt: Date.now(),
             log: [],
+            expectedDurationSec,
+            progressSec: 0,
           };
           exportJobs.set(id, job);
 
           job.status = "running";
+          updateRenderStatus({
+            jobId: id,
+            status: "running",
+            startedAt: job.startedAt,
+            endedAt: undefined,
+            outputPath,
+            outputName,
+            relPath,
+            expectedDurationSec,
+            progressSec: 0,
+            percent: 0,
+            etaSec: null,
+            error: undefined,
+            lastLog: `Rendering ${relPath}`,
+          });
           const hasAudio = inputHasAudio(absMedia);
           pushLog(job, `Rendering ${relPath} -> ${outputPath}\n`);
           pushLog(job, `Detected audio stream: ${hasAudio ? "yes" : "no"}\n`);
@@ -1820,9 +1897,37 @@ function studioApiPlugin(): Plugin {
           if (finalCode === 0) {
             job.status = "done";
             pushLog(job, `Done: ${outputPath}\n`);
+            updateRenderStatus({
+              jobId: id,
+              status: "done",
+              endedAt: job.endedAt,
+              outputPath,
+              outputName,
+              relPath,
+              expectedDurationSec,
+              progressSec: expectedDurationSec,
+              percent: 100,
+              etaSec: 0,
+              error: undefined,
+              lastLog: `Done: ${path.basename(outputPath)}`,
+            });
           } else {
             job.status = "error";
             job.error = `ffmpeg failed (${finalCode})`;
+            updateRenderStatus({
+              jobId: id,
+              status: "error",
+              endedAt: job.endedAt,
+              outputPath,
+              outputName,
+              relPath,
+              expectedDurationSec,
+              progressSec: job.progressSec ?? 0,
+              percent: expectedDurationSec > 0 ? clampPercent(((job.progressSec ?? 0) / expectedDurationSec) * 100) : null,
+              etaSec: null,
+              error: job.error,
+              lastLog: job.log.length ? String(job.log[job.log.length - 1]).trim().slice(-220) : job.error,
+            });
           }
 
           res.setHeader("Content-Type", "application/json");
@@ -2470,6 +2575,56 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to read export capabilities" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/latest-active", async (_req, res) => {
+        try {
+          const active = Array.from(exportJobs.values())
+            .filter((job) => job.status === "running" || job.status === "queued")
+            .sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(active ? { ...active, downloadUrl: null } : { job: null }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to fetch active export" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/render-status", async (_req, res) => {
+        try {
+          const active = Array.from(exportJobs.values())
+            .filter((job) => job.status === "running" || job.status === "queued")
+            .sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+
+          let out: RenderStatusSnapshot;
+          if (active) {
+            const expected = active.expectedDurationSec;
+            const progress = active.progressSec ?? 0;
+            const elapsedSec = Math.max(1, Math.round((Date.now() - active.startedAt) / 1000));
+            const speed = progress > 0 ? progress / elapsedSec : 0;
+            out = {
+              jobId: active.id,
+              status: "running",
+              startedAt: active.startedAt,
+              outputPath: active.outputPath,
+              outputName: active.outputName,
+              relPath: active.relPath,
+              expectedDurationSec: expected,
+              progressSec: progress,
+              percent: expected && expected > 0 ? clampPercent((progress / expected) * 100) : null,
+              etaSec: expected && speed > 0 ? Math.max(0, Math.round((expected - Math.min(expected, progress)) / speed)) : null,
+              lastLog: active.log.length ? String(active.log[active.log.length - 1]).trim().slice(-220) : undefined,
+            };
+          } else {
+            out = latestRenderStatus;
+          }
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(out));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to fetch render status" }));
         }
       });
 

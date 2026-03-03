@@ -16,7 +16,10 @@ RUN npm ci
 
 COPY . .
 
-RUN python3 -m pip install --break-system-packages -r scripts/requirements.txt
+RUN python3 -m pip install --break-system-packages -r scripts/requirements.txt \
+  && python3 -m pip install --break-system-packages --index-url https://download.pytorch.org/whl/cpu torch \
+  && python3 -m pip install --break-system-packages --no-deps openai-whisper \
+  && python3 -m pip install --break-system-packages tiktoken more-itertools numba regex
 
 ENV HOST=0.0.0.0 \
     PORT=4173 \

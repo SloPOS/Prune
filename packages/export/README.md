@@ -54,8 +54,10 @@ You can verify exporter behavior with fixture-driven checks (no Resolve/Premiere
 
 ```bash
 npm --workspace packages/export run validate:fixtures
+npm --workspace packages/export run test:interop
 # or from repo root
 npm run test:exports
+npm run test:interop
 ```
 
 What this validates:

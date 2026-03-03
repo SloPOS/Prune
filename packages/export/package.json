@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "validate:fixtures": "npm run build && node scripts/validate-export-fixtures.mjs"
+    "validate:fixtures": "npm run build && node scripts/validate-export-fixtures.mjs",
+    "test:interop": "npm run build && node scripts/test-interop.mjs"
   }
 }

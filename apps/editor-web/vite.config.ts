@@ -1626,6 +1626,9 @@ function studioApiPlugin(): Plugin {
                 isVideo,
                 isAudio,
                 mediaUrl: `/api/media?${new URLSearchParams({ root: target.root, path: relPath }).toString()}`,
+                thumbUrl: isVideo
+                  ? `/api/gallery/thumb?${new URLSearchParams({ root: target.root, path: relPath, v: String(stat.mtimeMs) }).toString()}`
+                  : null,
               });
             }
           }
@@ -1648,6 +1651,68 @@ function studioApiPlugin(): Plugin {
         } catch (error) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to load gallery" }));
+        }
+      });
+
+      server.middlewares.use("/api/gallery/thumb", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const root = String(url.searchParams.get("root") || "");
+          const relPath = String(url.searchParams.get("path") || "");
+          const rootMap = getRootMap();
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end("Invalid root");
+            return;
+          }
+          const absPath = safeResolve(root as RootName, relPath);
+          if (!absPath || !fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+            res.statusCode = 404;
+            res.end("File not found");
+            return;
+          }
+
+          const thumbsDir = path.resolve(REPO_ROOT, "data", "thumbs");
+          fs.mkdirSync(thumbsDir, { recursive: true });
+          const stat = fs.statSync(absPath);
+          const hash = crypto.createHash("sha1").update(`${root}:${relPath}:${stat.mtimeMs}`).digest("hex").slice(0, 20);
+          const thumbPath = path.join(thumbsDir, `${hash}.jpg`);
+
+          if (!fs.existsSync(thumbPath)) {
+            const firstTry = spawnSync("ffmpeg", [
+              "-y", "-hide_banner", "-loglevel", "error",
+              "-ss", "0.8",
+              "-i", absPath,
+              "-frames:v", "1",
+              "-vf", "scale=480:-1",
+              thumbPath,
+            ], { encoding: "utf-8" });
+            if (firstTry.status !== 0 || !fs.existsSync(thumbPath)) {
+              const fallbackTry = spawnSync("ffmpeg", [
+                "-y", "-hide_banner", "-loglevel", "error",
+                "-i", absPath,
+                "-frames:v", "1",
+                "-vf", "scale=480:-1",
+                thumbPath,
+              ], { encoding: "utf-8" });
+              if (fallbackTry.status !== 0 || !fs.existsSync(thumbPath)) {
+                res.statusCode = 404;
+                res.end("Thumbnail unavailable");
+                return;
+              }
+            }
+          }
+
+          const thumbStat = fs.statSync(thumbPath);
+          res.writeHead(200, {
+            "Content-Type": "image/jpeg",
+            "Content-Length": thumbStat.size,
+            "Cache-Control": "public, max-age=31536000, immutable",
+          });
+          fs.createReadStream(thumbPath).pipe(res);
+        } catch {
+          res.statusCode = 500;
+          res.end("Failed to load thumbnail");
         }
       });
 

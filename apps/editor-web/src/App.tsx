@@ -93,6 +93,7 @@ type GalleryItem = {
   isVideo: boolean;
   isAudio: boolean;
   mediaUrl: string;
+  thumbUrl?: string | null;
 };
 
 type GapSuggestion = {
@@ -2391,7 +2392,7 @@ export function App() {
                 </div>
                 <div className="galleryThumb">
                   {item.isVideo ? (
-                    <video src={item.mediaUrl} muted preload="metadata" controls={false} />
+                    <img src={item.thumbUrl || item.mediaUrl} alt={item.name} loading="lazy" />
                   ) : item.isAudio ? (
                     <div className="hint">Audio</div>
                   ) : (
@@ -2404,8 +2405,8 @@ export function App() {
                 <div className="row galleryActionsRow" style={{ gap: 6, marginTop: 6 }}>
                   <button onClick={() => void openGalleryItem(item)}>Open</button>
                   <div className="galleryActionsRight">
-                    <button className="galleryIconBtn" title="Download" aria-label="Download" onClick={() => setGalleryConfirmAction({ type: "download", item })}>⬇</button>
-                    <button className="galleryIconBtn galleryDeleteBtn" title="Delete" aria-label="Delete" onClick={() => setGalleryConfirmAction({ type: "delete", item })}>🗑</button>
+                    <button className="galleryIconBtn" title="Download" aria-label="Download" onClick={() => setGalleryConfirmAction({ type: "download", item })}><img className="galleryActionIcon" src="/icons/download.svg" alt="" /></button>
+                    <button className="galleryIconBtn galleryDeleteBtn" title="Delete" aria-label="Delete" onClick={() => setGalleryConfirmAction({ type: "delete", item })}><img className="galleryActionIcon" src="/icons/trash.svg" alt="" /></button>
                   </div>
                 </div>
               </div>

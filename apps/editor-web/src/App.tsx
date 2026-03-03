@@ -2210,7 +2210,7 @@ export function App() {
       </div>
     </div>
     {uploadProgress.active && (
-      <div className="settingsOverlay" style={{ zIndex: 86 }}>
+      <div className="settingsOverlay" style={{ zIndex: 1006 }}>
         <div className="settingsModal" style={{ maxWidth: 460, textAlign: "center" }}>
           <div className="spinner" />
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Uploading {uploadProgress.name}</div>
@@ -2225,7 +2225,7 @@ export function App() {
       </div>
     )}
     {loadingUiMessage && (
-      <div className="settingsOverlay" style={{ zIndex: 85 }}>
+      <div className="settingsOverlay" style={{ zIndex: 1005 }}>
         <div className="settingsModal" style={{ maxWidth: 420, textAlign: "center" }}>
           <div className="spinner" />
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{loadingUiMessage}</div>
@@ -2560,7 +2560,7 @@ export function App() {
     )}
 
     {showAboutModal && (
-      <div className="settingsOverlay" style={{ zIndex: 220 }} onClick={() => setShowAboutModal(false)}>
+      <div className="settingsOverlay" style={{ zIndex: 1020 }} onClick={() => setShowAboutModal(false)}>
         <div ref={aboutModalRef} className="settingsModal" style={{ maxWidth: 520, textAlign: "center", position: "relative", zIndex: 221, ...desktopModalStyle(aboutModalOffset) }} onClick={(e) => e.stopPropagation()}>
           <div className="row" onMouseDown={(e) => beginModalDrag("about", e)} style={{ justifyContent: "space-between", alignItems: "center", cursor: isMobileLayout ? "default" : "move" }}>
             <h3 style={{ margin: 0 }}>About Prune</h3>
@@ -2576,7 +2576,7 @@ export function App() {
     )}
 
     {showInAppNotifyModal && (
-      <div className="settingsOverlay" style={{ zIndex: 230 }} onClick={() => { setShowInAppNotifyModal(false); setFaviconAlert(false); }}>
+      <div className="settingsOverlay" style={{ zIndex: 1030 }} onClick={() => { setShowInAppNotifyModal(false); setFaviconAlert(false); }}>
         <div className="settingsModal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Render notification</h3>

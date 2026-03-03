@@ -1,1 +1,8 @@
-export * from "./fcpxmlV1";
+export type { KeepRange, SourceMediaMetadata, FcpxmlV1ExportOptions } from "./fcpxmlV1.js";
+export { exportFcpxmlV1 } from "./fcpxmlV1.js";
+
+export type { EdlExportOptions } from "./edlCmx3600.js";
+export { exportEdlCmx3600 } from "./edlCmx3600.js";
+
+export type { PremiereXmlExportOptions } from "./premiereXml.js";
+export { exportPremiereXml } from "./premiereXml.js";

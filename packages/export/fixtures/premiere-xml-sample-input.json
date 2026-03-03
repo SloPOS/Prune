@@ -1,0 +1,19 @@
+{
+  "keepRanges": [
+    { "sourceStartSec": 0, "sourceEndSec": 5, "outputStartSec": 0 },
+    { "sourceStartSec": 8, "sourceEndSec": 12.5, "outputStartSec": 5 }
+  ],
+  "source": {
+    "path": "/media/interview-a.mov",
+    "fps": 24,
+    "timecode": "01:00:00:00",
+    "durationSec": 120,
+    "name": "interview-a.mov"
+  },
+  "options": {
+    "projectName": "Interview Cut v1",
+    "sequenceName": "Interview Cut v1",
+    "width": 1920,
+    "height": 1080
+  }
+}

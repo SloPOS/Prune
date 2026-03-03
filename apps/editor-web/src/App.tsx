@@ -248,7 +248,7 @@ export function App() {
   const [splitLeftPct, setSplitLeftPct] = useState<number>(40);
   const [isResizing, setIsResizing] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
-  const [mobilePane, setMobilePane] = useState<"video" | "transcript">("video");
+  const [mobileTab, setMobileTab] = useState<"media" | "transcript" | "tools" | "export">("media");
   const splitRef = useRef<HTMLDivElement | null>(null);
 
   const [roots, setRoots] = useState<RootConfig[]>([]);
@@ -294,6 +294,7 @@ export function App() {
   const [sttPreset, setSttPreset] = useState<"fast" | "balanced" | "quality">("balanced");
   const [showSttPresetMenu, setShowSttPresetMenu] = useState(false);
   const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
+  const [showAppMenu, setShowAppMenu] = useState(false);
   const [lastAutoLoadedTranscriptJobId, setLastAutoLoadedTranscriptJobId] = useState<string | null>(null);
   const [filePickerFromTranscriptPrompt, setFilePickerFromTranscriptPrompt] = useState(false);
   const [exportCapabilities, setExportCapabilities] = useState<Array<{ format: string; videoEncoder: string | null; speed: string }>>([]);
@@ -315,6 +316,10 @@ export function App() {
   const [ignoredPhrases, setIgnoredPhrases] = useState<Set<string>>(new Set());
   const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(null);
   const [searchPhrase, setSearchPhrase] = useState("");
+  const [showTranscriptTips, setShowTranscriptTips] = useState(false);
+  const [showTranscriptSearchModal, setShowTranscriptSearchModal] = useState(false);
+  const [rangeSelectMode, setRangeSelectMode] = useState(false);
+  const [rangeSelectAnchor, setRangeSelectAnchor] = useState<number | null>(null);
   const [gapShortenerEnabled, setGapShortenerEnabled] = useState(false);
   const [gapMinThresholdSec, setGapMinThresholdSec] = useState(0.8);
   const [gapLeaveBehindSec, setGapLeaveBehindSec] = useState(0.12);
@@ -331,6 +336,8 @@ export function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mobileVideoRef = useRef<HTMLVideoElement | null>(null);
+  const mobileAudioRef = useRef<HTMLAudioElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const jsonUploadInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -435,6 +442,8 @@ export function App() {
   useEffect(() => {
     if (videoRef.current) videoRef.current.currentTime = 0;
     if (audioRef.current) audioRef.current.currentTime = 0;
+    if (mobileVideoRef.current) mobileVideoRef.current.currentTime = 0;
+    if (mobileAudioRef.current) mobileAudioRef.current.currentTime = 0;
     setCurrentTimeSec(0);
     setActiveTokenIndex(-1);
     setVideoDurationSec(0);
@@ -908,6 +917,41 @@ export function App() {
     setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
   }
 
+  async function exportEdl() {
+    if (!selectedMedia) return;
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/edl/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, outputName: exportName, keepRanges: keeps }),
+    });
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+    const data = await response.json();
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+  }
+
+  async function exportPremiereTimelineXml() {
+    if (!selectedMedia) return;
+    setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
+    const response = await fetch("/api/export/premiere/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: selectedMedia.root, path: selectedMedia.path, outputName: exportName, keepRanges: keeps }),
+    });
+    if (!response.ok) {
+      setExportState({ jobId: null, status: "error", outputPath: null, error: await response.text(), log: [] });
+      return;
+    }
+    const data = await response.json();
+    if (data.downloadUrl) window.open(data.downloadUrl, "_blank");
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}
+`] : [] }));
+  }
+
+
   async function loadLatestTranscript() {
     if (!selectedMedia || !transcriptPickerRoot) return;
     await loadTranscript(transcriptPickerRoot.id, `${sanitizeBaseName(selectedMedia.name)}.json`);
@@ -1064,8 +1108,23 @@ export function App() {
     });
   }
 
+  function toggleRangeByIndex(a: number, b: number) {
+    const start = Math.max(0, Math.min(a, b));
+    const end = Math.min(tokens.length - 1, Math.max(a, b));
+    if (start > end) return;
+    const ids = tokens.slice(start, end + 1).map((t) => t.id);
+    const allDeleted = ids.every((id) => deleted.has(id));
+    applyDeletedChange((next) => {
+      for (const id of ids) allDeleted ? next.delete(id) : next.add(id);
+    });
+  }
+
+  function getActiveMediaEl() {
+    return mobileVideoRef.current ?? mobileAudioRef.current ?? videoRef.current ?? audioRef.current;
+  }
+
   function playFromToken(token: WordToken) {
-    const mediaEl = videoRef.current ?? audioRef.current;
+    const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
     const seekTarget = Math.max(0, token.startSec + 0.01);
     mediaEl.currentTime = seekTarget;
@@ -1258,14 +1317,29 @@ export function App() {
 
   return (
     <>
-    <div className={`page split ${isMobileLayout ? `mobileLayout mobile-${mobilePane}` : ""}`} ref={splitRef} style={isMobileLayout ? undefined : { gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
+    <div className={`page split ${isMobileLayout ? `mobileLayout mobile-${mobileTab}` : ""}`} ref={splitRef} style={isMobileLayout ? undefined : { gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
       {isMobileLayout && (
         <div className="mobilePaneSwitch row">
-          <button className={mobilePane === "video" ? "active" : ""} onClick={() => setMobilePane("video")}>Media</button>
-          <button className={mobilePane === "transcript" ? "active" : ""} onClick={() => setMobilePane("transcript")}>Transcript</button>
+          <button className={mobileTab === "media" ? "active" : ""} onClick={() => setMobileTab("media")}>Media</button>
+          <button className={mobileTab === "transcript" ? "active" : ""} onClick={() => setMobileTab("transcript")} disabled={tokens.length === 0}>Transcript</button>
+          <button className={mobileTab === "tools" ? "active" : ""} onClick={() => setMobileTab("tools")}>Tools</button>
+          <button className={mobileTab === "export" ? "active" : ""} onClick={() => setMobileTab("export")}>Export</button>
+          <div className="appMenuWrap">
+            <button className="appMenuBtn" title="Project and settings menu" onClick={() => setShowAppMenu((v) => !v)}>☰</button>
+            {showAppMenu && (
+              <div className="appMenuDropdown">
+                <button className="themeIconOnlyBtn" title="Toggle light/dark theme" onClick={() => { setIsLightMode((v) => !v); setShowAppMenu(false); }}>{isLightMode ? "🌙" : "☀️"}</button>
+                <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); setShowAppMenu(false); }}>Settings</button>
+                <button title="Save current cut decisions for this media" onClick={() => { void saveProject(); setShowAppMenu(false); }} disabled={!selectedMedia}>Save project</button>
+                <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); setShowAppMenu(false); }}>Load project</button>
+                <button title="Clear current project and start fresh" onClick={() => { clearProject(); setShowAppMenu(false); }}>Clear project</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
       <div className="pane videoPane">
+        <div className="mobileMediaSection">
         <h2>Video</h2>
         <div className="hint">Selected: {videoLabel}</div>
         {videoSrc ? (
@@ -1284,8 +1358,24 @@ export function App() {
         <input ref={uploadInputRef} type="file" accept="video/*,audio/*,.json" style={{ display: "none" }} onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
 
         <label className="toggleRow"><input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />Preview Cuts (skip deleted sections during playback)</label>
+        {isMobileLayout && (
+          <div className="mobileWhisperRow row">
+            <div className="splitBtnWrap">
+              <button className="splitBtnMain" onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : `Run Whisper ${sttPreset === "fast" ? "Fast draft" : sttPreset === "balanced" ? "Balanced" : "Quality"}`}</button>
+              <button className="splitBtnCaret" title="Choose Whisper preset" onClick={() => setShowSttPresetMenuInline((v) => !v)}>▾</button>
+              {showSttPresetMenuInline && (
+                <div className="splitBtnMenu">
+                  <button onClick={() => { setSttPreset("fast"); setShowSttPresetMenuInline(false); }}>Fast draft (tiny)</button>
+                  <button onClick={() => { setSttPreset("balanced"); setShowSttPresetMenuInline(false); }}>Balanced (base)</button>
+                  <button onClick={() => { setSttPreset("quality"); setShowSttPresetMenuInline(false); }}>Quality (small)</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
 
-        <details className="collapsedPanel" open={openLeftPanel === "noise"}>
+        <details className="collapsedPanel mobileToolsSection" open={openLeftPanel === "noise"}>
           <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "noise" ? null : "noise")); }}>
             <strong>Suggest-only Detection (v1)</strong>
             <span className="hint">Candidates: {analysisCandidates.length}</span>
@@ -1311,7 +1401,7 @@ export function App() {
           )}
         </details>
 
-        <details className="collapsedPanel sttPanel" open={openLeftPanel === "stt"}>
+        <details className="collapsedPanel sttPanel mobileToolsSection" open={openLeftPanel === "stt"}>
           <summary onClick={(e) => { e.preventDefault(); setShowSttPresetMenuInline(false); setOpenLeftPanel((prev) => (prev === "stt" ? null : "stt")); }}>
             <strong>Speech-to-text</strong>
             <span className="hint">Status: {transcribe.status}</span>
@@ -1341,46 +1431,68 @@ export function App() {
           )}
         </details>
 
-        <div className="exportButtonWrap">
-          <div className="row" style={{ marginBottom: 0 }}>
-            <button title="Toggle light/dark theme" onClick={() => setIsLightMode((v) => !v)}>{isLightMode ? "🌙" : "☀️"}</button>
-            <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
-            <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
-            <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
-            <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
-          </div>
-          <button className="exportBigButton" title="Review final cut preview and export options" onClick={() => setShowExportModal(true)}>Export</button>
+        <div className="exportButtonWrap mobileExportSection">
+          {isMobileLayout ? (
+            <div className="mobileExportPanel">
+              <div className="hint">Final review and export options.</div>
+              {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
+              <div className="row">
+                <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220, flex: 1 }} title="Base file name for exports" />
+              </div>
+              <div className="row">
+                <button title="Render cut media file" onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Edited Video/Audio</button>
+                <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
+                <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
+                <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
+              </div>
+              <div className="row">
+                <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
+                <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
+                <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
+                <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+              </div>
+              <div className="hint">Export status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
+              {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
+            </div>
+          ) : (
+            <button className="exportBigButton" title="Review final cut preview and export options" onClick={() => setShowExportModal(true)}>Export</button>
+          )}
         </div>
       </div>
 
       <div className={`splitHandle ${isResizing ? "active" : ""}`} onMouseDown={() => setIsResizing(true)} role="separator" aria-orientation="vertical" />
 
       <div className="pane transcriptPane">
+        <div className="mobileTranscriptSection">
+        {isMobileLayout && videoSrc && (
+          <div className="mobileInlinePlayer">
+            {activeMediaKind === "video"
+              ? <div className="videoFrame16x9"><video ref={mobileVideoRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} /></div>
+              : <audio ref={mobileAudioRef} controls src={videoSrc} onTimeUpdate={onVideoTimeUpdate} onLoadedMetadata={(e) => setVideoDurationSec(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)} style={{ width: "100%", marginBottom: 10 }} />}
+          </div>
+        )}
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>Transcript</h2>
-          <button title="Undo last transcript removal action" onClick={() => undoLastDeleteAction()} disabled={undoStack.length === 0}>Undo</button>
+          <div className="row" style={{ marginBottom: 0, alignItems: "center" }}>
+            <h2 style={{ margin: 0 }}>Transcript</h2>
+            <button title="Show/hide transcript tips" onClick={() => setShowTranscriptTips((v) => !v)}>ℹ️</button>
+          </div>
+          <div className="row" style={{ marginBottom: 0 }}>
+            <button onClick={() => setShowTranscriptSearchModal(true)}>Search</button>
+            <button title="Toggle range select mode" className={rangeSelectMode ? "active" : ""} onClick={() => { setRangeSelectMode((v) => !v); setRangeSelectAnchor(null); }}>Range</button>
+            <button title="Undo last transcript removal action" onClick={() => undoLastDeleteAction()} disabled={undoStack.length === 0}>Undo</button>
+          </div>
         </div>
-        <div className="hint">Click words to mark/remove cuts. Click-drag across words to toggle a whole span. Double-click a word to jump and resume playback from that point.</div>
-        <div className="hint">Playback: {currentTimeSec.toFixed(2)}s</div>
-        <div className={`timingBadge ${timingMatch ? "ok" : "warn"}`}>
-          {timingValid ? (timingMatch ? `Timing match ✓ (video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)` : `Timing warning ⚠ (Δ ${timingDiffSec.toFixed(2)}s · video ${videoDurationSec.toFixed(2)}s vs transcript ${transcriptDurationSec.toFixed(2)}s)`) : "Timing check pending: load video + transcript"}
-        </div>
-
-        <div className="row transcriptSearchRow">
-          <input value={searchPhrase} onChange={(e) => setSearchPhrase(e.target.value)} placeholder="Search phrase in transcript" style={{ minWidth: 260, flex: 1 }} />
-          <div className="hint">Matches: {Math.floor(searchedTokenIds.length / Math.max(1, normalizeText(searchPhrase).split(" ").filter(Boolean).length || 1))}</div>
-          <button onClick={() => setSearchPhrase("")} disabled={!searchPhrase}>Clear</button>
-          <button onClick={() => removeSearchedMatches()} disabled={searchedTokenIds.length === 0}>Toggle remove matches</button>
-        </div>
+        {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. Double-click a word to play from it.</div>}
 
         <p className="transcriptParagraph">
           {tokens.map((t, index) => {
             const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
-            return <span key={t.id}><button onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
+            return <span key={t.id}><button data-token-index={index} onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
           })}
         </p>
+        </div>
 
-        <div className="toolsStack">
+        <div className="toolsStack mobileToolsSection">
           <details className="collapsedPanel" open={openToolPanel === "smart"}>
             <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "smart" ? null : "smart")); }}>
               <strong>Smart Cleanup</strong>
@@ -1461,6 +1573,25 @@ export function App() {
 
       </div>
     </div>
+    {showTranscriptSearchModal && (
+      <div className="settingsOverlay" onClick={() => setShowTranscriptSearchModal(false)}>
+        <div className="settingsModal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Search transcript</h3>
+            <button title="Close" onClick={() => setShowTranscriptSearchModal(false)}>✕</button>
+          </div>
+          <div className="row transcriptSearchRow">
+            <input value={searchPhrase} onChange={(e) => setSearchPhrase(e.target.value)} placeholder="Search phrase in transcript" style={{ minWidth: 260, flex: 1 }} />
+            <div className="hint">Matches: {Math.floor(searchedTokenIds.length / Math.max(1, normalizeText(searchPhrase).split(" ").filter(Boolean).length || 1))}</div>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button onClick={() => setSearchPhrase("")} disabled={!searchPhrase}>Clear</button>
+            <button onClick={() => removeSearchedMatches()} disabled={searchedTokenIds.length === 0}>Toggle remove matches</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {showFilePickerModal && (
       <div className="settingsOverlay" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
@@ -1562,12 +1693,13 @@ export function App() {
             <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
             <button title="Render cut media file" onClick={() => void startExport()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Edited Video/Audio</button>
             <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
+            <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
+            <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
           </div>
           <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
           <div className="row">
-            <button disabled title="Coming soon">Export Adobe Premiere XML (coming soon)</button>
             <button disabled title="Coming soon">Export After Effects markers (coming soon)</button>
-            <button disabled title="Coming soon">Export AAF/EDL (coming soon)</button>
+            <button disabled title="Coming soon">Export AAF (coming soon)</button>
           </div>
           <h4>Subtitles & Script</h4>
           <div className="row">
@@ -1578,9 +1710,6 @@ export function App() {
           </div>
           <div className="hint">Export status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
           {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
-          <div className="row">
-            <button onClick={() => setShowExportModal(false)}>Close</button>
-          </div>
         </div>
       </div>
     )}

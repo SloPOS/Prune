@@ -5,6 +5,8 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import { exportFcpxmlV1, type KeepRange } from "../../packages/export/src/fcpxmlV1";
+import { exportEdlCmx3600 } from "../../packages/export/src/edlCmx3600";
+import { exportPremiereXml } from "../../packages/export/src/premiereXml";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 type RootName = string;
@@ -109,6 +111,9 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
+const edlJobs = new Map<string, EdlExportJob>();
+const premiereXmlJobs = new Map<string, PremiereXmlExportJob>();
+const aeMarkerJobs = new Map<string, MarkerExportJob>();
 
 function projectsDir(): string {
   return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || path.resolve(REPO_ROOT, "data", "projects"));
@@ -125,6 +130,43 @@ type FcpxmlExportJob = {
   error?: string;
   fps?: number;
   timecode?: string;
+  createdAt: number;
+};
+
+type EdlExportJob = {
+  id: string;
+  status: "done" | "error";
+  root: RootName;
+  relPath: string;
+  outputPath?: string;
+  outputName: string;
+  error?: string;
+  fps?: number;
+  timecode?: string;
+  createdAt: number;
+};
+
+type PremiereXmlExportJob = {
+  id: string;
+  status: "done" | "error";
+  root: RootName;
+  relPath: string;
+  outputPath?: string;
+  outputName: string;
+  error?: string;
+  fps?: number;
+  timecode?: string;
+  createdAt: number;
+};
+
+type MarkerExportJob = {
+  id: string;
+  status: "done" | "error";
+  root: RootName;
+  relPath: string;
+  outputPath?: string;
+  outputName: string;
+  error?: string;
   createdAt: number;
 };
 
@@ -297,6 +339,19 @@ function normalizeRange(input: RangeInput): { startSec: number; endSec: number }
   const end = Number(input.sourceEndSec ?? input.endSec);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || start < 0) return null;
   return { startSec: start, endSec: end };
+}
+
+function toTimelineKeepRanges(keepRanges: Array<{ startSec: number; endSec: number }>): KeepRange[] {
+  let outputStartSec = 0;
+  return keepRanges.map((r) => {
+    const mapped: KeepRange = {
+      sourceStartSec: r.startSec,
+      sourceEndSec: r.endSec,
+      outputStartSec,
+    };
+    outputStartSec += Math.max(0, r.endSec - r.startSec);
+    return mapped;
+  });
 }
 
 function normalizeKeepRanges(body: { keepRanges?: RangeInput[]; cuts?: RangeInput[] }): { startSec: number; endSec: number }[] {
@@ -533,6 +588,30 @@ function sanitizeFcpxmlName(raw: string, sourceRelPath: string): string {
   const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
   const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${base || "edited"}.fcpxml`;
+}
+
+function sanitizeEdlName(raw: string, sourceRelPath: string): string {
+  const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
+  const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "edited"}.edl`;
+}
+
+function sanitizePremiereXmlName(raw: string, sourceRelPath: string): string {
+  const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
+  const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "edited"}-premiere.xml`;
+}
+
+function sanitizeAeMarkersName(raw: string, sourceRelPath: string): string {
+  const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
+  const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "edited"}-ae-markers.json`;
+}
+
+function sanitizeAafName(raw: string, sourceRelPath: string): string {
+  const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
+  const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${base || "edited"}.aaf.json`;
 }
 
 function sanitizeScriptName(raw: string): string {
@@ -1678,11 +1757,7 @@ function studioApiPlugin(): Plugin {
           const sourceMetadata = probeFcpxmlMetadata(absMedia);
 
           const fcpxml = exportFcpxmlV1(
-            keepRanges.map((r, i, arr) => ({
-              sourceStartSec: r.startSec,
-              sourceEndSec: r.endSec,
-              outputStartSec: i === 0 ? 0 : arr.slice(0, i).reduce((sum, x) => sum + (x.endSec - x.startSec), 0),
-            })) as KeepRange[],
+            toTimelineKeepRanges(keepRanges),
             {
               path: absMedia,
               fps: sourceMetadata.fps,
@@ -1747,6 +1822,226 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to download FCPXML" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/edl/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
+          const relPath = String(body.path ?? "");
+          const outputName = sanitizeEdlName(String(body.outputName ?? ""), relPath);
+          const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
+
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (keepRanges.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid keepRanges/cuts provided" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
+
+          const edl = exportEdlCmx3600(
+            toTimelineKeepRanges(keepRanges),
+            {
+              path: absMedia,
+              fps: sourceMetadata.fps,
+              timecode: sourceMetadata.timecode,
+              durationSec: sourceMetadata.durationSec,
+              name: path.basename(absMedia),
+            },
+            {
+              title: path.basename(outputName, ".edl"),
+              reel: path.basename(absMedia, path.extname(absMedia)),
+            },
+          );
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, edl, "utf-8");
+
+          const id = crypto.randomUUID();
+          const job: EdlExportJob = {
+            id,
+            status: "done",
+            root,
+            relPath,
+            outputPath,
+            outputName,
+            createdAt: Date.now(),
+            fps: sourceMetadata.fps,
+            timecode: sourceMetadata.timecode,
+          };
+          edlJobs.set(id, job);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            jobId: id,
+            status: job.status,
+            outputPath,
+            downloadUrl: `/api/export/edl/download?jobId=${id}`,
+            metadata: { fps: sourceMetadata.fps, timecode: sourceMetadata.timecode },
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export EDL" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/edl/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = edlJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download EDL" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/premiere/start", async (req, res) => {
+        try {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          req.on("data", (c) => chunks.push(c));
+          await new Promise((resolve) => req.on("end", resolve));
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+
+          const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
+          const relPath = String(body.path ?? "");
+          const outputName = sanitizePremiereXmlName(String(body.outputName ?? ""), relPath);
+          const keepRanges = normalizeKeepRanges(body);
+          const rootMap = getRootMap();
+
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+
+          if (keepRanges.length === 0) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "No valid keepRanges/cuts provided" }));
+            return;
+          }
+
+          const absMedia = safeResolve(root, relPath);
+          if (!absMedia || !fs.existsSync(absMedia) || !fs.statSync(absMedia).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Media file not found" }));
+            return;
+          }
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
+
+          const premiereXml = exportPremiereXml(
+            toTimelineKeepRanges(keepRanges),
+            {
+              path: absMedia,
+              fps: sourceMetadata.fps,
+              timecode: sourceMetadata.timecode,
+              durationSec: sourceMetadata.durationSec,
+              name: path.basename(absMedia),
+            },
+            {
+              projectName: path.basename(outputName, ".xml"),
+              sequenceName: path.basename(outputName, ".xml"),
+            },
+          );
+
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, premiereXml, "utf-8");
+
+          const id = crypto.randomUUID();
+          const job: PremiereXmlExportJob = {
+            id,
+            status: "done",
+            root,
+            relPath,
+            outputPath,
+            outputName,
+            createdAt: Date.now(),
+            fps: sourceMetadata.fps,
+            timecode: sourceMetadata.timecode,
+          };
+          premiereXmlJobs.set(id, job);
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            jobId: id,
+            status: job.status,
+            outputPath,
+            downloadUrl: `/api/export/premiere/download?jobId=${id}`,
+            metadata: { fps: sourceMetadata.fps, timecode: sourceMetadata.timecode },
+          }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to export Premiere XML" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/premiere/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = premiereXmlJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/xml; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download Premiere XML" }));
         }
       });
 

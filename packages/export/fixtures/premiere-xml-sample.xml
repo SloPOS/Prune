@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="5">
+  <project>
+    <name>Interview Cut v1</name>
+    <children>
+      <sequence id="sequence-1">
+        <name>Interview Cut v1</name>
+        <duration>228</duration>
+        <rate>
+          <timebase>24</timebase>
+          <ntsc>FALSE</ntsc>
+        </rate>
+        <timecode>
+          <rate>
+            <timebase>24</timebase>
+            <ntsc>FALSE</ntsc>
+          </rate>
+          <frame>86400</frame>
+          <displayformat>NDF</displayformat>
+        </timecode>
+        <media>
+          <video>
+            <format>
+              <samplecharacteristics>
+                <rate>
+                  <timebase>24</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <width>1920</width>
+                <height>1080</height>
+              </samplecharacteristics>
+            </format>
+            <track>
+              <clipitem id="clipitem-1">
+                <name>interview-a.mov seg 1</name>
+                <enabled>TRUE</enabled>
+                <start>0</start>
+                <end>120</end>
+                <in>0</in>
+                <out>120</out>
+                <file id="file-1" />
+              </clipitem>
+              <clipitem id="clipitem-2">
+                <name>interview-a.mov seg 2</name>
+                <enabled>TRUE</enabled>
+                <start>120</start>
+                <end>228</end>
+                <in>192</in>
+                <out>300</out>
+                <file id="file-1" />
+              </clipitem>
+            </track>
+          </video>
+        </media>
+      </sequence>
+      <clip id="masterclip-1">
+        <name>interview-a.mov</name>
+        <duration>2880</duration>
+        <rate>
+          <timebase>24</timebase>
+          <ntsc>FALSE</ntsc>
+        </rate>
+        <timecode>
+          <rate>
+            <timebase>24</timebase>
+            <ntsc>FALSE</ntsc>
+          </rate>
+          <frame>86400</frame>
+          <displayformat>NDF</displayformat>
+        </timecode>
+        <media>
+          <video>
+            <track>
+              <clipitem id="masterclipitem-1">
+                <name>interview-a.mov</name>
+                <file id="file-1" />
+              </clipitem>
+            </track>
+          </video>
+        </media>
+      </clip>
+      <file id="file-1">
+        <name>interview-a.mov</name>
+        <pathurl>file:///media/interview-a.mov</pathurl>
+        <duration>2880</duration>
+        <rate>
+          <timebase>24</timebase>
+          <ntsc>FALSE</ntsc>
+        </rate>
+      </file>
+    </children>
+  </project>
+</xmeml>

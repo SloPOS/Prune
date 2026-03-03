@@ -591,25 +591,37 @@ export function App() {
   }, [transcribe.jobId, transcribe.status]);
 
   useEffect(() => {
-    if (!exportState.jobId || (exportState.status !== "running" && exportState.status !== "starting")) return;
-    const timer = window.setInterval(async () => {
-      const query = new URLSearchParams({ jobId: exportState.jobId! }).toString();
-      const data = await fetchJsonSafe(`/api/export/status?${query}`);
-      if (!data) return;
-      setExportState((prev) => ({ ...prev, status: normalizeRunningStatus(data.status), outputPath: data.outputPath ?? prev.outputPath, error: data.error ?? null, log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log }));
-      if (data.status === "done" && data.downloadUrl && exportState.jobId && !downloadedExportJobs.has(exportState.jobId)) {
-        if (autoDownloadWhenReady) window.open(data.downloadUrl, "_blank");
-        setDownloadedExportJobs((prev) => new Set(prev).add(exportState.jobId!));
-      }
-    }, 1200);
-    return () => window.clearInterval(timer);
-  }, [exportState.jobId, exportState.status, downloadedExportJobs, autoDownloadWhenReady]);
+    const shouldTrackExport = exportState.status === "running" || exportState.status === "starting";
+    const shouldRecoverLatest = showExportProgressModal && !exportState.jobId && shouldTrackExport;
+    if (!shouldTrackExport) return;
 
-  useEffect(() => {
-    if (!(showExportProgressModal && !exportState.jobId && (exportState.status === "starting" || exportState.status === "running"))) return;
-    const timer = window.setInterval(async () => {
+    let mounted = true;
+    const poll = async () => {
+      if (!mounted) return;
+
+      if (exportState.jobId) {
+        const query = new URLSearchParams({ jobId: exportState.jobId }).toString();
+        const data = await fetchJsonSafe(`/api/export/status?${query}`);
+        if (!mounted || !data) return;
+
+        setExportState((prev) => ({
+          ...prev,
+          status: normalizeRunningStatus(data.status),
+          outputPath: data.outputPath ?? prev.outputPath,
+          error: data.error ?? null,
+          log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
+        }));
+
+        if (data.status === "done" && data.downloadUrl && !downloadedExportJobs.has(exportState.jobId)) {
+          if (autoDownloadWhenReady) window.open(data.downloadUrl, "_blank");
+          setDownloadedExportJobs((prev) => new Set(prev).add(exportState.jobId!));
+        }
+        return;
+      }
+
+      if (!shouldRecoverLatest) return;
       const data = await fetchJsonSafe("/api/export/latest-active");
-      if (!data || !data.id) return;
+      if (!mounted || !data || !data.id) return;
       setExportState((prev) => ({
         ...prev,
         jobId: data.id,
@@ -618,9 +630,15 @@ export function App() {
         error: data.error ?? prev.error ?? null,
         log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
       }));
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [showExportProgressModal, exportState.jobId, exportState.status]);
+    };
+
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, exportState.jobId ? 1200 : 1500);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [showExportProgressModal, exportState.jobId, exportState.status, downloadedExportJobs, autoDownloadWhenReady]);
 
   useEffect(() => {
     const prevStatus = prevExportStatusRef.current;

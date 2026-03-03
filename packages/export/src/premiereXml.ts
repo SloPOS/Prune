@@ -80,7 +80,7 @@ export function exportPremiereXml(
               <end>${endFrames}</end>
               <in>${inFrames}</in>
               <out>${outFrames}</out>
-              <file id="file-1" />
+              <file id="file-1"></file>
             </clipitem>`;
     })
     .join("\n");
@@ -147,7 +147,7 @@ ${clipItems}
             <track>
               <clipitem id="masterclipitem-1">
                 <name>${xmlEscape(mediaName)}</name>
-                <file id="file-1" />
+                <file id="file-1"></file>
               </clipitem>
             </track>
           </video>

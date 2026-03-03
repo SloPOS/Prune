@@ -38,7 +38,7 @@
                 <end>120</end>
                 <in>0</in>
                 <out>120</out>
-                <file id="file-1" />
+                <file id="file-1"></file>
               </clipitem>
               <clipitem id="clipitem-2">
                 <name>interview-a.mov seg 2</name>
@@ -47,7 +47,7 @@
                 <end>228</end>
                 <in>192</in>
                 <out>300</out>
-                <file id="file-1" />
+                <file id="file-1"></file>
               </clipitem>
             </track>
           </video>
@@ -73,7 +73,7 @@
             <track>
               <clipitem id="masterclipitem-1">
                 <name>interview-a.mov</name>
-                <file id="file-1" />
+                <file id="file-1"></file>
               </clipitem>
             </track>
           </video>

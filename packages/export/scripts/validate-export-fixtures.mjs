@@ -48,17 +48,26 @@ function parsePremiereXml(xml) {
   const timebase = Number((xml.match(/<sequence id="sequence-1">[\s\S]*?<timebase>(\d+)<\/timebase>/) || [])[1] || 0);
   const tcFrame = Number((xml.match(/<sequence id="sequence-1">[\s\S]*?<frame>(\d+)<\/frame>/) || [])[1] || 0);
 
-  const clips = [...xml.matchAll(/<clipitem id="clipitem-\d+">([\s\S]*?)<\/clipitem>/g)].map((m) => {
-    const chunk = m[1];
-    return {
-      start: Number((chunk.match(/<start>(\d+)<\/start>/) || [])[1] || 0),
-      end: Number((chunk.match(/<end>(\d+)<\/end>/) || [])[1] || 0),
-      in: Number((chunk.match(/<in>(\d+)<\/in>/) || [])[1] || 0),
-      out: Number((chunk.match(/<out>(\d+)<\/out>/) || [])[1] || 0),
-    };
-  });
+  const clipChunks = [...xml.matchAll(/<clipitem id="clipitem-\d+">([\s\S]*?)<\/clipitem>/g)].map((m) => m[1]);
+  const clips = clipChunks.map((chunk) => ({
+    start: Number((chunk.match(/<start>(\d+)<\/start>/) || [])[1] || 0),
+    end: Number((chunk.match(/<end>(\d+)<\/end>/) || [])[1] || 0),
+    in: Number((chunk.match(/<in>(\d+)<\/in>/) || [])[1] || 0),
+    out: Number((chunk.match(/<out>(\d+)<\/out>/) || [])[1] || 0),
+    hasFileNode: /<file id="file-1"\s*(?:\/>|><\/file>)/.test(chunk),
+    hasEscapedFileNode: /&lt;file\b/.test(chunk),
+  }));
 
-  return { sequenceDuration, timebase, tcFrame, clips };
+  const masterClipChunk = (xml.match(/<clipitem id="masterclipitem-1">([\s\S]*?)<\/clipitem>/) || [])[1] || "";
+
+  return {
+    sequenceDuration,
+    timebase,
+    tcFrame,
+    clips,
+    hasEscapedFileAnywhere: /&lt;file\b/.test(xml),
+    hasMasterFileNode: /<file id="file-1"\s*(?:\/>|><\/file>)/.test(masterClipChunk),
+  };
 }
 
 function runFixture(fixturePath) {
@@ -103,7 +112,24 @@ function runFixture(fixturePath) {
     assert.equal(premiereParsed.sequenceDuration, expect.premiere.sequenceDuration, `${fixture.name}: Premiere sequence duration`);
     assert.equal(premiereParsed.timebase, expect.premiere.timebase, `${fixture.name}: Premiere timebase`);
     assert.equal(premiereParsed.tcFrame, expect.premiere.tcFrame, `${fixture.name}: Premiere tc frame`);
-    assert.deepEqual(premiereParsed.clips, expect.premiere.clips, `${fixture.name}: Premiere clip boundaries`);
+    assert.deepEqual(
+      premiereParsed.clips.map((clip) => ({
+        start: clip.start,
+        end: clip.end,
+        in: clip.in,
+        out: clip.out,
+      })),
+      expect.premiere.clips,
+      `${fixture.name}: Premiere clip boundaries`,
+    );
+
+    assert.equal(premiereParsed.hasEscapedFileAnywhere, false, `${fixture.name}: Premiere XML should not contain escaped <file> tags`);
+    assert.equal(premiereParsed.hasMasterFileNode, true, `${fixture.name}: Premiere master clipitem should contain a nested <file> element`);
+
+    for (let i = 0; i < premiereParsed.clips.length; i += 1) {
+      assert.equal(premiereParsed.clips[i].hasEscapedFileNode, false, `${fixture.name}: Premiere clip ${i + 1} should not contain escaped <file> text`);
+      assert.equal(premiereParsed.clips[i].hasFileNode, true, `${fixture.name}: Premiere clip ${i + 1} should contain nested <file> element`);
+    }
 
     for (let i = 1; i < premiereParsed.clips.length; i += 1) {
       assert.equal(

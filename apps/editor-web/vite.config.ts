@@ -20,17 +20,17 @@ type StudioSettings = {
   exportCacheHours?: number;
 };
 
-const SETTINGS_PATH = path.resolve(process.env.BITCUT_SETTINGS_PATH || path.join(REPO_ROOT, "data", "config.json"));
+const SETTINGS_PATH = path.resolve((process.env.PRUNE_SETTINGS_PATH) || path.join(REPO_ROOT, "data", "config.json"));
 const DEFAULT_SETTINGS: StudioSettings = {
   roots: [
-    { id: "root-1", name: "Media", path: path.resolve(process.env.BITCUT_INBOX_ROOT || path.resolve(REPO_ROOT, "inbox")) },
-    { id: "root-2", name: "Archive", path: path.resolve(process.env.BITCUT_ARCHIVE_ROOT || path.resolve(REPO_ROOT, "data", "archive")) },
+    { id: "root-1", name: "Media", path: path.resolve((process.env.PRUNE_INBOX_ROOT) || path.resolve(REPO_ROOT, "inbox")) },
+    { id: "root-2", name: "Archive", path: path.resolve((process.env.PRUNE_ARCHIVE_ROOT) || path.resolve(REPO_ROOT, "data", "archive")) },
   ],
-  uploadDir: path.resolve(process.env.BITCUT_UPLOAD_DIR || path.resolve(REPO_ROOT, "data", "uploads")),
-  exportDir: process.env.BITCUT_EXPORT_DIR,
-  transcriptDir: path.resolve(process.env.BITCUT_TRANSCRIPT_DIR || path.resolve(REPO_ROOT, "data", "transcripts")),
-  projectsDir: path.resolve(process.env.BITCUT_PROJECTS_DIR || path.resolve(REPO_ROOT, "data", "projects")),
-  exportCacheHours: Number(process.env.BITCUT_EXPORT_CACHE_HOURS || 72),
+  uploadDir: path.resolve((process.env.PRUNE_UPLOAD_DIR) || path.resolve(REPO_ROOT, "data", "uploads")),
+  exportDir: (process.env.PRUNE_EXPORT_DIR),
+  transcriptDir: path.resolve((process.env.PRUNE_TRANSCRIPT_DIR) || path.resolve(REPO_ROOT, "data", "transcripts")),
+  projectsDir: path.resolve((process.env.PRUNE_PROJECTS_DIR) || path.resolve(REPO_ROOT, "data", "projects")),
+  exportCacheHours: Number((process.env.PRUNE_EXPORT_CACHE_HOURS) || 72),
 };
 
 let studioSettings: StudioSettings = loadSettings();

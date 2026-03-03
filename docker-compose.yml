@@ -6,12 +6,13 @@ services:
       - "4173:4173"
     environment:
       - TZ=UTC
-      - BITCUT_MEDIA_ROOTS=/data/media
-      - BITCUT_UPLOAD_DIR=/data/uploads
-      - BITCUT_TRANSCRIPT_DIR=/data/transcripts
-      - BITCUT_PROJECTS_DIR=/data/projects
-      - BITCUT_EXPORT_DIR=/data/exports
-      - BITCUT_SETTINGS_PATH=/data/config.json
+      - PRUNE_INBOX_ROOT=/data/media
+      - PRUNE_ARCHIVE_ROOT=/data/archive
+      - PRUNE_UPLOAD_DIR=/data/uploads
+      - PRUNE_TRANSCRIPT_DIR=/data/transcripts
+      - PRUNE_PROJECTS_DIR=/data/projects
+      - PRUNE_EXPORT_DIR=/data/exports
+      - PRUNE_SETTINGS_PATH=/data/config.json
     volumes:
       - ./data:/data
     restart: unless-stopped

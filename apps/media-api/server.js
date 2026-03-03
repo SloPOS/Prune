@@ -6,8 +6,8 @@ const PORT = Number(process.env.PORT || 3199);
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const ALLOWED_ROOTS = {
-  inbox: path.resolve(process.env.BITCUT_INBOX_ROOT || path.join(REPO_ROOT, 'inbox')),
-  archive: path.resolve(process.env.BITCUT_ARCHIVE_ROOT || path.join(REPO_ROOT, 'data', 'archive')),
+  inbox: path.resolve((process.env.PRUNE_INBOX_ROOT) || path.join(REPO_ROOT, 'inbox')),
+  archive: path.resolve((process.env.PRUNE_ARCHIVE_ROOT) || path.join(REPO_ROOT, 'data', 'archive')),
 };
 
 const MEDIA_EXTENSIONS = new Set([

@@ -20,12 +20,13 @@ RUN python3 -m pip install --break-system-packages -r scripts/requirements.txt
 
 ENV HOST=0.0.0.0 \
     PORT=4173 \
-    BITCUT_MEDIA_ROOTS=/data/media \
-    BITCUT_UPLOAD_DIR=/data/uploads \
-    BITCUT_TRANSCRIPT_DIR=/data/transcripts \
-    BITCUT_PROJECTS_DIR=/data/projects \
-    BITCUT_EXPORT_DIR=/data/exports \
-    BITCUT_SETTINGS_PATH=/data/config.json
+    PRUNE_INBOX_ROOT=/data/media \
+    PRUNE_ARCHIVE_ROOT=/data/archive \
+    PRUNE_UPLOAD_DIR=/data/uploads \
+    PRUNE_TRANSCRIPT_DIR=/data/transcripts \
+    PRUNE_PROJECTS_DIR=/data/projects \
+    PRUNE_EXPORT_DIR=/data/exports \
+    PRUNE_SETTINGS_PATH=/data/config.json
 
 EXPOSE 4173
 

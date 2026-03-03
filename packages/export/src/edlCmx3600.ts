@@ -38,7 +38,7 @@ export function exportEdlCmx3600(
   source: SourceMediaMetadata,
   options: EdlExportOptions = {},
 ): string {
-  const title = (options.title || "BIT_CUT").replace(/[^A-Za-z0-9 _-]/g, "_").slice(0, 64);
+  const title = (options.title || "PRUNE").replace(/[^A-Za-z0-9 _-]/g, "_").slice(0, 64);
   const reel = cleanReel(options.reel || source.name || source.path.split("/").pop() || "AX");
   const fps = source.fps;
 

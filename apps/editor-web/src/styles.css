@@ -261,7 +261,7 @@ summary { cursor: pointer; color: var(--muted); }
 }
 
 .collapsedPanel.sttPanel[open] {
-  overflow: auto;
+  overflow: visible;
 }
 
 .collapsedPanel.gapPanel[open] {
@@ -1072,6 +1072,8 @@ button.settingsActionHalf {
 .splitBtnWrap {
   position: relative;
   display: inline-flex;
+  overflow: visible;
+  z-index: 120;
 }
 
 .splitBtnMain {
@@ -1095,10 +1097,11 @@ button.settingsActionHalf {
   flex-direction: column;
   min-width: 210px;
   background: var(--bg-soft);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  z-index: 80;
+  z-index: 320;
   overflow: hidden;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
 }
 
 .splitBtnMenu > button {

@@ -16,15 +16,12 @@ RUN npm ci
 
 COPY . .
 
-RUN python3 -m venv /opt/prune-venv \
-  && /opt/prune-venv/bin/pip install --upgrade pip setuptools wheel \
-  && /opt/prune-venv/bin/pip install -r scripts/requirements.txt \
-  && /opt/prune-venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch \
-  && /opt/prune-venv/bin/pip install --no-deps openai-whisper \
-  && /opt/prune-venv/bin/pip install tiktoken more-itertools numba regex
+RUN python3 -m pip install --break-system-packages -r scripts/requirements.txt \
+  && python3 -m pip install --break-system-packages --index-url https://download.pytorch.org/whl/cpu torch \
+  && python3 -m pip install --break-system-packages --no-deps openai-whisper \
+  && python3 -m pip install --break-system-packages tiktoken more-itertools numba regex
 
-ENV PATH=/opt/prune-venv/bin:$PATH \
-    HOST=0.0.0.0 \
+ENV HOST=0.0.0.0 \
     PORT=4173 \
     PRUNE_INBOX_ROOT=/data/media \
     PRUNE_ARCHIVE_ROOT=/data/archive \

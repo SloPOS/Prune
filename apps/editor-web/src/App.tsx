@@ -901,6 +901,22 @@ export function App() {
     setExportState((prev) => ({ ...prev, jobId: data.jobId, status: "running", outputPath: data.outputPath ?? null }));
   }
 
+  async function autoDownload(url: string, fallbackName: string) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const cd = res.headers.get("content-disposition") || "";
+    const m = cd.match(/filename="?([^";]+)"?/i);
+    a.href = objectUrl;
+    a.download = m?.[1] || fallbackName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   async function exportResolveFcpxml() {
     if (!selectedMedia) return;
     setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
@@ -914,7 +930,8 @@ export function App() {
       return;
     }
     const data = await response.json();
-    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+    if (data.downloadUrl) await autoDownload(data.downloadUrl, `${exportName || "timeline"}.fcpxml`);
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Downloaded: ${data.downloadUrl}\n`] : [] }));
   }
 
   async function exportEdl() {
@@ -930,7 +947,8 @@ export function App() {
       return;
     }
     const data = await response.json();
-    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+    if (data.downloadUrl) await autoDownload(data.downloadUrl, `${exportName || "timeline"}.edl`);
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Downloaded: ${data.downloadUrl}\n`] : [] }));
   }
 
   async function exportPremiereTimelineXml() {
@@ -946,8 +964,8 @@ export function App() {
       return;
     }
     const data = await response.json();
-    if (data.downloadUrl) window.open(data.downloadUrl, "_blank");
-    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+    if (data.downloadUrl) await autoDownload(data.downloadUrl, `${exportName || "timeline"}.xml`);
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Downloaded: ${data.downloadUrl}\n`] : [] }));
   }
 
   async function exportAfterEffectsMarkersJson() {
@@ -963,8 +981,8 @@ export function App() {
       return;
     }
     const data = await response.json();
-    if (data.downloadUrl) window.open(data.downloadUrl, "_blank");
-    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Download: ${data.downloadUrl}\n`] : [] }));
+    if (data.downloadUrl) await autoDownload(data.downloadUrl, `${exportName || "timeline"}-markers.json`);
+    setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Downloaded: ${data.downloadUrl}\n`] : [] }));
   }
 
   async function exportAafScaffold() {

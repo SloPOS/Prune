@@ -1819,6 +1819,8 @@ function studioApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/xml; charset=utf-8");
           res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
           res.end(content);
+          try { fs.unlinkSync(job.outputPath); } catch {}
+          fcpxmlJobs.delete(id);
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to download FCPXML" }));
@@ -1929,6 +1931,8 @@ function studioApiPlugin(): Plugin {
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
           res.end(content);
+          try { fs.unlinkSync(job.outputPath); } catch {}
+          edlJobs.delete(id);
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to download EDL" }));
@@ -2039,6 +2043,8 @@ function studioApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/xml; charset=utf-8");
           res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
           res.end(content);
+          try { fs.unlinkSync(job.outputPath); } catch {}
+          premiereXmlJobs.delete(id);
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to download Premiere XML" }));
@@ -2169,6 +2175,8 @@ function studioApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
           res.end(content);
+          try { fs.unlinkSync(job.outputPath); } catch {}
+          aeMarkerJobs.delete(id);
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to download After Effects markers" }));

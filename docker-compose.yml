@@ -1,5 +1,6 @@
 services:
   prune:
+    build: .
     image: fauxrhino/prune:latest
     container_name: prune
     ports:

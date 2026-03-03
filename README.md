@@ -1,5 +1,12 @@
 # Prune
 
+<p align="center">
+  <img src="docs/screenshots/prune-logo.jpg" alt="Prune logo" width="220" />
+</p>
+
+<p align="center"><strong>Rough cuts at the speed of text.</strong></p>
+<p align="center">Designed by <strong>FauxRhino</strong> · Contact: <a href="mailto:Faux@fauxrhino.com">Faux@fauxrhino.com</a></p>
+
 Transcript-first video editing for self-hosted workflows.
 
 Prune lets you edit spoken content by editing words: remove words/phrases in transcript, generate precise timeline cuts, preview quickly, then export to media + NLE interchange formats.

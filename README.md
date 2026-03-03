@@ -87,8 +87,7 @@ Send your timeline directly to your heavy-duty editor of choice:
 ### One-Command Installer
 For the fastest automated setup, run our installation script directly in your terminal:
 ```bash
-curl -fsSL [https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh](https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh) | bash
-
+curl -fsSL https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh | bash
 ```
 
 ### Docker Compose (Recommended)
@@ -96,7 +95,7 @@ curl -fsSL [https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-
 The easiest and most reliable way to run Prune locally is via Docker.
 
 ```bash
-git clone [https://github.com/SloPOS/Prune.git](https://github.com/SloPOS/Prune.git)
+git clone https://github.com/SloPOS/Prune.git
 cd Prune
 docker compose up -d --build
 

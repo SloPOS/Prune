@@ -1288,7 +1288,7 @@ button.settingsActionHalf {
 }
 
 .galleryIconBtn:not(.galleryDeleteBtn) .galleryActionIcon {
-  filter: brightness(1.45) contrast(1.15);
+  filter: invert(1) brightness(1.45) contrast(1.15);
 }
 
 :root[data-theme="light"] .galleryIconBtn:not(.galleryDeleteBtn) .galleryActionIcon {

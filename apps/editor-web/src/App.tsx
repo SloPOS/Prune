@@ -2356,7 +2356,7 @@ export function App() {
             <div className="row" style={{ gap: 6 }}>
               <button onClick={() => setGallerySelected(new Set(galleryItems.map((i) => i.id)))} disabled={galleryItems.length === 0}>Select all</button>
               <button onClick={() => setGallerySelected(new Set())} disabled={gallerySelected.size === 0}>Clear</button>
-              <button onClick={() => void deleteSelectedGalleryItems()} disabled={gallerySelected.size === 0}>Delete selected</button>
+              <button className="galleryDeleteBtn" onClick={() => void deleteSelectedGalleryItems()} disabled={gallerySelected.size === 0}>🗑 Delete selected</button>
             </div>
           </div>
 
@@ -2365,15 +2365,17 @@ export function App() {
           <div className="galleryGrid">
             {galleryItems.map((item) => (
               <div key={item.id} className="galleryCard">
-                <label className="toggleRow" style={{ margin: 0, justifyContent: "space-between" }}>
-                  <span className="hint">{item.kind === "export" ? "Export" : "Original"}</span>
-                  <input type="checkbox" checked={gallerySelected.has(item.id)} onChange={(e) => setGallerySelected((prev) => {
-                    const next = new Set(prev);
-                    if (e.target.checked) next.add(item.id);
-                    else next.delete(item.id);
-                    return next;
-                  })} />
-                </label>
+                <div className="galleryCardTopRow">
+                  <div className="galleryCardRightControls">
+                    <span className="galleryKindTag">{item.kind === "export" ? "Export" : "Original"}</span>
+                    <input type="checkbox" checked={gallerySelected.has(item.id)} onChange={(e) => setGallerySelected((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(item.id);
+                      else next.delete(item.id);
+                      return next;
+                    })} />
+                  </div>
+                </div>
                 <div className="galleryThumb">
                   {item.isVideo ? (
                     <video src={item.mediaUrl} muted preload="metadata" controls={false} />
@@ -2383,13 +2385,13 @@ export function App() {
                     <div className="hint">File</div>
                   )}
                 </div>
-                <div className="cleanupTitle" style={{ marginTop: 6 }}><span>{item.name}</span></div>
+                <div className="cleanupTitle galleryTitleScroll" style={{ marginTop: 6 }}><span>{item.name}</span></div>
                 <div className="hint">{new Date(item.modifiedAt).toLocaleString()}</div>
                 <div className="hint">{formatDurationShort(item.durationSec)} · {formatBytes(item.sizeBytes)}</div>
                 <div className="row" style={{ gap: 6, marginTop: 6 }}>
                   <button onClick={() => void openGalleryItem(item)}>Open</button>
-                  <button onClick={() => downloadGalleryItem(item)}>Download</button>
-                  <button onClick={() => void deleteGalleryItem(item)}>Delete</button>
+                  <button className="galleryIconBtn" title="Download" aria-label="Download" onClick={() => downloadGalleryItem(item)}>⬇</button>
+                  <button className="galleryIconBtn galleryDeleteBtn" title="Delete" aria-label="Delete" onClick={() => void deleteGalleryItem(item)}>🗑</button>
                 </div>
               </div>
             ))}

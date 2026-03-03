@@ -1,4 +1,4 @@
-import type { WordToken } from "@bit-cut/core";
+import type { WordToken } from "@prune/core";
 
 export const mockTranscript: WordToken[] = [
   { id: "w1", text: "Hey", startSec: 0.2, endSec: 0.4 },

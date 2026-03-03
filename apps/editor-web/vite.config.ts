@@ -1887,7 +1887,7 @@ function studioApiPlugin(): Plugin {
             {
               projectName: path.basename(outputName, ".fcpxml"),
               sequenceName: path.basename(outputName, ".fcpxml"),
-              eventName: "bit-cut-studio",
+              eventName: "prune",
             },
           );
 
@@ -2353,7 +2353,7 @@ function studioApiPlugin(): Plugin {
           const fcpxml = exportFcpxmlV1(keepRanges as KeepRange[], source, {
             projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
-            eventName: "bit-cut-studio",
+            eventName: "prune",
           });
           const edl = exportEdlCmx3600(keepRanges as KeepRange[], source, {
             title: outputName.replace(/\.zip$/, "").toUpperCase().slice(0, 64),
@@ -2365,7 +2365,7 @@ function studioApiPlugin(): Plugin {
           });
 
           const readme = [
-            "Bit Cut Studio AAF Bridge Package",
+            "Prune AAF Bridge Package",
             "",
             "Contents:",
             "- manifest.json: normalized timeline ranges",

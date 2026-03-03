@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@bit-cut/core";
+import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@prune/core";
 
 type RootName = string;
 type BrowserEntry = {

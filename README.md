@@ -1,18 +1,18 @@
-# Bit Cut Studio
+# Prune
 
 Transcript-first video editing for self-hosted workflows.
 
-Bit Cut Studio lets you edit spoken content by editing words: remove words/phrases in transcript, generate precise timeline cuts, preview quickly, then export to media + NLE interchange formats.
+Prune lets you edit spoken content by editing words: remove words/phrases in transcript, generate precise timeline cuts, preview quickly, then export to media + NLE interchange formats.
 
 ---
 
 ## Screenshots
 
 ### Desktop editor
-![Bit Cut Studio desktop editor](docs/screenshots/desktop-main.png)
+![Prune desktop editor](docs/screenshots/desktop-main.png)
 
 ### Mobile layout
-![Bit Cut Studio mobile layout](docs/screenshots/mobile-home.png)
+![Prune mobile layout](docs/screenshots/mobile-home.png)
 
 ---
 
@@ -40,6 +40,10 @@ Bit Cut Studio lets you edit spoken content by editing words: remove words/phras
 - **Responsive UI**
   - desktop split-pane editor
   - mobile tabbed layout (Media / Transcript / Tools / Export)
+  - mobile tab-scoped popups (switch tabs without losing modal state)
+  - mobile portrait-optimized settings cards + controls
+- **Render without transcript**
+  - video/audio render now supports full-range remux/re-encode workflows even when no transcript is loaded
 
 ---
 
@@ -78,7 +82,7 @@ Bit Cut Studio lets you edit spoken content by editing words: remove words/phras
 
 ```bash
 npm install
-npm run dev -w @bit-cut/editor-web
+npm run dev -w @prune/editor-web
 ```
 
 Open the local Vite URL shown in terminal.

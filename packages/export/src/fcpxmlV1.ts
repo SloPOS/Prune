@@ -90,7 +90,7 @@ export function exportFcpxmlV1(
 ): string {
   const rate = normalizeRate(source.fps);
   const mediaName = source.name ?? source.path.split("/").pop() ?? "source-media";
-  const eventName = options.eventName ?? "bit-cut-studio";
+  const eventName = options.eventName ?? "prune";
   const projectName = options.projectName ?? "Bit Cut Timeline";
   const sequenceName = options.sequenceName ?? projectName;
 

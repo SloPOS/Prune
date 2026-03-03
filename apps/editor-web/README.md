@@ -1,6 +1,6 @@
-# @bit-cut/editor-web
+# @prune/editor-web
 
-React + Vite frontend for Bit Cut Studio.
+React + Vite frontend for Prune.
 
 ## What this app does
 
@@ -15,13 +15,13 @@ React + Vite frontend for Bit Cut Studio.
 From repo root:
 
 ```bash
-npm run dev -w @bit-cut/editor-web
+npm run dev -w @prune/editor-web
 ```
 
 ## Build
 
 ```bash
-npm run build -w @bit-cut/editor-web
+npm run build -w @prune/editor-web
 ```
 
 ## UX notes

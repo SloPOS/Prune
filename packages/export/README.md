@@ -1,4 +1,4 @@
-# @bit-cut/export
+# @prune/export
 
 Draft exporters for NLE interchange formats.
 
@@ -9,7 +9,7 @@ Draft exporters for NLE interchange formats.
 ### API
 
 ```ts
-import { exportFcpxmlV1 } from "@bit-cut/export";
+import { exportFcpxmlV1 } from "@prune/export";
 
 const xml = exportFcpxmlV1(
   [
@@ -23,7 +23,7 @@ const xml = exportFcpxmlV1(
   },
   {
     projectName: "Interview Cut v1",
-    eventName: "bit-cut-studio",
+    eventName: "prune",
   },
 );
 ```
@@ -77,7 +77,7 @@ If you change exporter logic, update/add fixtures to lock in expected behavior.
 ### API
 
 ```ts
-import { exportPremiereXml } from "@bit-cut/export";
+import { exportPremiereXml } from "@prune/export";
 
 const xml = exportPremiereXml(
   [

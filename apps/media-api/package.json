@@ -1,5 +1,5 @@
 {
-  "name": "@bit-cut/media-api",
+  "name": "@prune/media-api",
   "private": true,
   "version": "0.0.1",
   "main": "server.js",

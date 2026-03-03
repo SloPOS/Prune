@@ -1,0 +1,40 @@
+{
+  "name": "basic-24fps-contiguous",
+  "source": {
+    "path": "/media/interview-a.mov",
+    "name": "Interview A.mov",
+    "fps": 24,
+    "timecode": "01:00:00:00",
+    "durationSec": 12
+  },
+  "keepRanges": [
+    { "sourceStartSec": 0, "sourceEndSec": 2, "outputStartSec": 0 },
+    { "sourceStartSec": 3.5, "sourceEndSec": 5, "outputStartSec": 2 }
+  ],
+  "expect": {
+    "fcpxml": {
+      "frameDuration": "1/24s",
+      "sequenceTcStart": "86400/24s",
+      "clips": [
+        { "offset": "0/24s", "start": "86400/24s", "duration": "48/24s" },
+        { "offset": "48/24s", "start": "86484/24s", "duration": "36/24s" }
+      ]
+    },
+    "edl": {
+      "title": "BASIC_24FPS_CONTIGUOUS",
+      "events": [
+        { "srcIn": "00:00:00:00", "srcOut": "00:00:02:00", "recIn": "00:00:00:00", "recOut": "00:00:02:00" },
+        { "srcIn": "00:00:03:12", "srcOut": "00:00:05:00", "recIn": "00:00:02:00", "recOut": "00:00:03:12" }
+      ]
+    },
+    "premiere": {
+      "sequenceDuration": 84,
+      "timebase": 24,
+      "tcFrame": 86400,
+      "clips": [
+        { "start": 0, "end": 48, "in": 0, "out": 48 },
+        { "start": 48, "end": 84, "in": 84, "out": 120 }
+      ]
+    }
+  }
+}

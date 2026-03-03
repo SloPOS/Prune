@@ -1,0 +1,40 @@
+{
+  "name": "hour-boundary-25fps",
+  "source": {
+    "path": "/media/long-take.mov",
+    "name": "Long Take.mov",
+    "fps": 25,
+    "timecode": "10:00:00:00",
+    "durationSec": 7200
+  },
+  "keepRanges": [
+    { "sourceStartSec": 3599.96, "sourceEndSec": 3600.04, "outputStartSec": 0 },
+    { "sourceStartSec": 3601, "sourceEndSec": 3601.12, "outputStartSec": 0.08 }
+  ],
+  "expect": {
+    "fcpxml": {
+      "frameDuration": "1/25s",
+      "sequenceTcStart": "900000/25s",
+      "clips": [
+        { "offset": "0/25s", "start": "989999/25s", "duration": "2/25s" },
+        { "offset": "2/25s", "start": "990025/25s", "duration": "3/25s" }
+      ]
+    },
+    "edl": {
+      "title": "HOUR_BOUNDARY_25FPS",
+      "events": [
+        { "srcIn": "00:59:59:24", "srcOut": "01:00:00:01", "recIn": "00:00:00:00", "recOut": "00:00:00:02" },
+        { "srcIn": "01:00:01:00", "srcOut": "01:00:01:03", "recIn": "00:00:00:02", "recOut": "00:00:00:05" }
+      ]
+    },
+    "premiere": {
+      "sequenceDuration": 5,
+      "timebase": 25,
+      "tcFrame": 900000,
+      "clips": [
+        { "start": 0, "end": 2, "in": 89999, "out": 90001 },
+        { "start": 2, "end": 5, "in": 90025, "out": 90028 }
+      ]
+    }
+  }
+}

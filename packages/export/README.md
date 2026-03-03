@@ -63,6 +63,7 @@ What this validates:
 - keep-range boundary mapping in FCPXML (`offset`, `start`, `duration`)
 - output continuity between stitched ranges (record out == next record in)
 - frame/timecode formatting for EDL and frameDuration/tcStart formatting in FCPXML
+- Premiere XML clip in/out/start/end frame mapping (when `exportPremiereXml` exists)
 
 Fixture files live in `packages/export/fixtures/validation/*.json`.
 If you change exporter logic, update/add fixtures to lock in expected behavior.

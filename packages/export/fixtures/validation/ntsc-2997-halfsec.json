@@ -1,0 +1,40 @@
+{
+  "name": "ntsc-2997-halfsec-continuity",
+  "source": {
+    "path": "/media/broll-b.mp4",
+    "name": "B-Roll B.mp4",
+    "fps": 29.97,
+    "timecode": "00:59:59:29",
+    "durationSec": 30
+  },
+  "keepRanges": [
+    { "sourceStartSec": 10, "sourceEndSec": 10.5, "outputStartSec": 0 },
+    { "sourceStartSec": 10.5, "sourceEndSec": 11, "outputStartSec": 0.5 }
+  ],
+  "expect": {
+    "fcpxml": {
+      "frameDuration": "1001/30000s",
+      "sequenceTcStart": "108106999/30000s",
+      "clips": [
+        { "offset": "0/30000s", "start": "108407299/30000s", "duration": "15015/30000s" },
+        { "offset": "15015/30000s", "start": "108422314/30000s", "duration": "15015/30000s" }
+      ]
+    },
+    "edl": {
+      "title": "NTSC_2997_HALFSEC_CONTINUITY",
+      "events": [
+        { "srcIn": "00:00:10:00", "srcOut": "00:00:10:15", "recIn": "00:00:00:00", "recOut": "00:00:00:15" },
+        { "srcIn": "00:00:10:15", "srcOut": "00:00:11:00", "recIn": "00:00:00:15", "recOut": "00:00:01:00" }
+      ]
+    },
+    "premiere": {
+      "sequenceDuration": 30,
+      "timebase": 30,
+      "tcFrame": 107999,
+      "clips": [
+        { "start": 0, "end": 15, "in": 300, "out": 315 },
+        { "start": 15, "end": 30, "in": 315, "out": 330 }
+      ]
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# @bit-cut/editor-web
+
+React + Vite frontend for Bit Cut Studio.
+
+## What this app does
+
+- Loads media from configured server roots or local upload
+- Runs Whisper transcription jobs
+- Lets users remove transcript words to generate cuts
+- Exports media + timeline interchange formats
+- Supports desktop and mobile-first editing layouts
+
+## Dev run
+
+From repo root:
+
+```bash
+npm run dev -w @bit-cut/editor-web
+```
+
+## Build
+
+```bash
+npm run build -w @bit-cut/editor-web
+```
+
+## UX notes
+
+- Desktop: resizable split view (video left, transcript/tools right)
+- Mobile: bottom tab nav (`Media`, `Transcript`, `Tools`, `Export`)
+- Transcript tips are collapsible (`ℹ️` toggle)
+- Search opens in modal on transcript page
+
+## Export UX behavior
+
+- Sidecar outputs (XML/EDL/JSON/etc) trigger direct download
+- Rendered media exports are cached server-side for later retrieval
+
+## Key files
+
+- `src/App.tsx` — main application logic + view state
+- `src/styles.css` — shared desktop/mobile styles
+- `vite.config.ts` — local API middleware + export/transcribe endpoints

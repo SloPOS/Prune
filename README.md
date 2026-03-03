@@ -1,168 +1,106 @@
-# bit-cut-studio
+# Bit Cut Studio
 
-Private R&D repo for an AI-assisted video editor focused on **transcript-first editing**.
+Transcript-first video editing for self-hosted workflows.
 
-## Vision
+Bit Cut Studio lets you edit spoken content by editing words: remove words/phrases in transcript, generate precise timeline cuts, preview quickly, then export to media + NLE interchange formats.
 
-Edit spoken-video content by editing text:
-- run speech-to-text on source media
-- show transcript + video side-by-side
-- delete words/phrases/sections in transcript
-- auto-generate timeline cuts from those deletions
-- export cut decisions to NLEs (first target: **DaVinci Resolve** interchange)
+---
 
-## MVP (Phase 1)
+## Screenshots
 
-1. Ingest video/audio
-2. Transcribe with word-level timestamps
-3. Render editable transcript in a web UI
-4. On transcript deletion, compute precise cut list
-5. Preview resulting stitched timeline
-6. Export edit decision list (JSON + FCPXML/EDL candidate)
+### Desktop editor
+![Bit Cut Studio desktop editor](docs/screenshots/desktop-main.png)
 
-## Monorepo plan
+### Mobile layout
+![Bit Cut Studio mobile layout](docs/screenshots/mobile-home.png)
 
-- `apps/editor-web` – transcript/video editing UI (React)
-- `packages/core` – timeline, transcript diff, cut engine
-- `packages/stt` – transcription adapters (Whisper/local/remote)
-- `packages/export` – Resolve/NLE interchange exporters
-- `docs/` – architecture, product spec, tech decisions
+---
 
-## Run the prototype
+## Core features
 
-Prerequisites:
+- **Transcript-first editing**
+  - click words to remove/restore
+  - drag-range multi-select on desktop
+  - range mode on mobile
+- **Whisper STT built in**
+  - preset modes (Fast / Balanced / Quality)
+  - background progress + ETA
+  - transcript auto-load after completion
+- **Project persistence**
+  - save/load/delete named project states
+  - restores transcript + deleted tokens + trim settings
+- **Smart cleanup & cut helpers**
+  - fixed-phrase cleanup
+  - word-gap shortener
+  - suggest-only breath/noise detection
+- **Cross-platform file flow**
+  - server-side folder picker
+  - local upload support
+  - dedicated transcripts/projects/export directories
+- **Responsive UI**
+  - desktop split-pane editor
+  - mobile tabbed layout (Media / Transcript / Tools / Export)
+
+---
+
+## Export formats
+
+### Media
+- Edited video/audio render (`.mp4`)
+
+### Interchange
+- Resolve/FCPXML (`.fcpxml`)
+- CMX3600 EDL (`.edl`)
+- Premiere XML (`.xml`)
+- After Effects markers JSON (`.json`)
+- AAF bridge package (`.zip`) with OTIO conversion script + fallback timelines
+
+### Subtitle/script
+- `.srt`, `.vtt`, script `.txt`
+
+---
+
+## Download/cache behavior
+
+- **Small sidecar exports** (XML/EDL/JSON/etc): immediate browser download, then server copy is removed.
+- **Rendered media exports**: remain cached on server and respect configured retention window.
+
+---
+
+## Quick start
+
+### Prereqs
 - Node.js 20+
 - ffmpeg + ffprobe in PATH
-- Python 3.10+ (for Whisper)
+- Python 3.10+
+
+### Install + run
 
 ```bash
 npm install
 npm run dev -w @bit-cut/editor-web
 ```
 
-Then open the Vite URL. Click transcript words to mark them deleted and inspect generated cut/keep ranges.
+Open the local Vite URL shown in terminal.
 
-## Whisper transcription runner
+---
 
-This repo includes a local Whisper runner (`scripts/transcribe_whisper.py`) plus npm helpers for extracting WAV audio and writing transcript JSON to `data/transcripts/`.
+## Validation suites
 
-### 1) Install Python dependency
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-npm run transcribe:install
-```
-
-### 2) Extract audio only (manual)
+Run export-focused automated checks:
 
 ```bash
-npm run transcribe:extract -- data/source/my-video.mp4 data/audio/my-video.wav
+npm run test:exports
+npm run test:interop
 ```
 
-### 3) Run Whisper on an existing WAV (manual)
+These validate timeline parity/continuity across export formats and contract checks for download behavior.
 
-```bash
-npm run transcribe:whisper -- data/audio/my-video.wav --out data/transcripts/my-video.json
-```
+---
 
-### 4) One-command flow (recommended)
+## Project docs
 
-```bash
-npm run transcribe:media -- data/source/my-video.mp4
-```
-
-This will:
-- extract mono 16k WAV to `data/audio/<name>.wav`
-- run `scripts/transcribe_whisper.py`
-- write transcript JSON to `data/transcripts/<name>.json`
-
-You can optionally override model/runtime settings:
-
-```bash
-WHISPER_MODEL=medium WHISPER_LANGUAGE=en npm run transcribe:media -- data/source/my-video.mp4 episode-01
-```
-
-Supported env overrides:
-- `STT_BACKEND` (default `faster-whisper`; `whisper-cpp`/`openvino` toggle path reserved, not wired yet)
-- `WHISPER_MODEL` (default `small`)
-- `WHISPER_DEVICE` (default `cpu`)
-- `WHISPER_COMPUTE_TYPE` (default `int8`)
-- `WHISPER_LANGUAGE` (default `en`)
-- `AUDIO_DIR` (default `data/audio`)
-- `TRANSCRIPTS_DIR` (default `data/transcripts`)
-
-App filesystem env overrides (`.env`):
-- `BITCUT_INBOX_ROOT` (default `<repo>/inbox`)
-- `BITCUT_ARCHIVE_ROOT` (default `<repo>/data/archive`)
-- `BITCUT_UPLOAD_SUBDIR` (default `incoming/uploads`, under archive root)
-- `BITCUT_EXPORT_DIR` (default `<archive>/exports`)
-
-## Media file API (safe listing)
-
-Run:
-
-```bash
-npm run media-api
-```
-
-Default port: `3199` (`PORT` env var overrides).
-
-Routes:
-- `GET /health`
-- `GET /api/roots`
-- `GET /api/media?root=inbox|archive&dir=<relative>&recursive=0|1&limit=200`
-- `POST /api/export/start`
-- `GET /api/export/status?jobId=<uuid>`
-- `POST /api/export/fcpxml/start`
-- `POST /api/export/edl/start`
-- `POST /api/export/premiere/start`
-- `POST /api/export/after-effects-markers/start`
-- `GET /api/export/after-effects-markers/download?jobId=<uuid>`
-- `POST /api/export/aaf/start` (build AAF bridge package)
-- `GET /api/export/aaf/download?jobId=<uuid>`
-
-Behavior:
-- only two configured roots are allowed (`inbox` and `archive`)
-- defaults (if env vars are not set):
-  - `inbox` => `<repo>/inbox`
-  - `archive` => `<repo>/data/archive`
-- path traversal is blocked by resolving + validating relative paths
-- hidden files/dirs are skipped
-- media extension allowlist is enforced
-- transcript discovery checks, in order:
-  - `<basename>.transcript.json`
-  - `<basename>.json`
-
-Export API request body (`POST /api/export/start`):
-- `root`: `inbox` or `archive`
-- `path`: media file path relative to root
-- `outputName`: desired output filename (auto-sanitized, forced to `.mp4`)
-- `keepRanges`: array of `{ sourceStartSec, sourceEndSec }` or `{ startSec, endSec }`
-- `cuts`: optional fallback; keep ranges are computed if `keepRanges` is missing
-
-Export behavior:
-- output directory prefers `BITCUT_EXPORT_DIR` (or `<archive>/exports` by default)
-- if that is unavailable, falls back to `data/exports/`
-- encoder prefers `h264_qsv` when available and auto-retries with `libx264` on failure
-- poll `GET /api/export/status?jobId=...` for status/logs/output path
-- After Effects export currently writes a JSON marker scaffold intended for scripting/automation workflows (not direct `.aep` injection)
-- AAF export generates a downloadable bridge zip (`*-aaf-bridge.zip`) containing `manifest.json`, `import_aaf.py`, and fallback timeline files (`timeline.fcpxml`, `timeline.edl`, `timeline-premiere.xml`)
-- Bridge script creates binary `.aaf` via OpenTimelineIO (`opentimelineio` + `otio-aaf-adapter`), with explicit fallback imports if adapter support is unavailable on a given workstation/NLE build
-
-## AAF bridge validation procedure
-
-1. Export from UI: **Export AAF bridge package**.
-2. Confirm browser downloads `*-aaf-bridge.zip`.
-3. Unzip and run:
-   - `python3 -m pip install opentimelineio otio-aaf-adapter`
-   - `python3 import_aaf.py --manifest manifest.json --out timeline.aaf`
-4. Import `timeline.aaf` into the target NLE.
-5. If your environment cannot write/read AAF, import one of:
-   - `timeline.fcpxml` (Resolve/FCP-compatible)
-   - `timeline.edl` (CMX3600)
-   - `timeline-premiere.xml` (Premiere XML)
-
-## Immediate next steps
-
-See `docs/PHASE-1-PLAN.md`.
+- `docs/ARCHITECTURE.md`
+- `docs/PHASE-1-PLAN.md`
+- `docs/STT_BACKEND_DECISION.md`
+- `docs/BREATH_NOISE_PLAN.md`

@@ -55,6 +55,17 @@ Stop hunting for dead air. Let Prune find it for you.
 * **Total Recall:** Instantly restore your exact transcript, deleted tokens, and trim settings.
 * **Cross-Platform Files:** Features a server-side folder picker, local upload support, and dedicated directories for your transcripts, projects, and exports.
 
+###  Render Status + In-App Notifications
+Long renders should not feel like guesswork.
+* **Global Render Status:** A dedicated Render Status widget tracks FFmpeg state (Idle / Rendering / Finished / Error) even if you close the render popup.
+* **Live Progress + ETA:** Status bars and time-left estimates are synchronized across the widget and render-progress popup.
+* **In-App Alerts:** Optional completion alerts include sound, popup notification, and favicon badge so you'll know when a render is done.
+* **Download Control:** Choose to auto-download on completion or download manually from the completion notification.
+
+###  Polished Desktop + Mobile UX
+* **Draggable Desktop Popups:** Major desktop modals can be moved around the viewport while staying window-bounded.
+* **Mobile-First Layout:** Tab-scoped modals and accordion-based controls keep the interface usable on smaller screens without removing desktop capability.
+
 ###  Render Without Transcripts
 Just need a quick conversion? Prune's video/audio render engine supports full-range remux and re-encode workflows even when you haven't loaded a transcript.
 

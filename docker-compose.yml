@@ -1,3 +1,4 @@
+version: '3.8'
 services:
   prune:
     image: fauxrhino/prune:latest
@@ -5,7 +6,8 @@ services:
     ports:
       - "4173:4173"
     environment:
-      - TZ=UTC
+      - HOST=0.0.0.0
+      - PORT=4173
       - PRUNE_INBOX_ROOT=/data/media
       - PRUNE_ARCHIVE_ROOT=/data/archive
       - PRUNE_UPLOAD_DIR=/data/uploads
@@ -13,6 +15,3 @@ services:
       - PRUNE_PROJECTS_DIR=/data/projects
       - PRUNE_EXPORT_DIR=/data/exports
       - PRUNE_SETTINGS_PATH=/data/config.json
-    volumes:
-      - ./data:/data
-    restart: unless-stopped

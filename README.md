@@ -94,6 +94,49 @@ npm run dev -w @prune/editor-web
 
 Open the local Vite URL shown in terminal.
 
+### One-command installer (curl | bash)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh | bash
+```
+
+---
+
+## Deployment options
+
+### Docker Compose (recommended)
+
+```bash
+git clone https://github.com/SloPOS/Prune.git
+cd Prune
+docker compose up -d --build
+```
+
+App URL: `http://localhost:4173`
+
+### Publish image to Docker Hub
+
+1. Create Docker Hub repo (e.g. `fauxrhino/prune`)
+2. Build + tag image:
+   ```bash
+   docker build -t fauxrhino/prune:latest .
+   ```
+3. Login + push:
+   ```bash
+   docker login
+   docker push fauxrhino/prune:latest
+   ```
+4. Users can then run with image override in `docker-compose.yml`:
+   ```yaml
+   services:
+     prune:
+       image: fauxrhino/prune:latest
+       ports:
+         - "4173:4173"
+       volumes:
+         - ./data:/data
+   ```
+
 ---
 
 ## Validation suites

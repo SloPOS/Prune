@@ -1,12 +1,12 @@
 :root {
   color-scheme: dark;
-  --bg: #0b0f17;
-  --bg-soft: #121927;
-  --panel: #151f2f;
-  --line: #263349;
+  --bg: #101311;
+  --bg-soft: #171b18;
+  --panel: #1d2320;
+  --line: #303a34;
   --text: #e8edf7;
   --muted: #95a3bb;
-  --accent: #6ea8fe;
+  --accent: #2d8d6a;
   --danger: #f07a7a;
   --ok: #4ed0a8;
   --warn: #ffbf5f;
@@ -20,7 +20,7 @@
   --line: #d9dee8;
   --text: #1f2430;
   --muted: #5a6475;
-  --accent: #3a7bff;
+  --accent: #1f8f5f;
   --danger: #c63f3f;
   --ok: #1f8f5f;
   --warn: #9a6a00;
@@ -95,11 +95,38 @@ h2, h3 {
   font-weight: 600;
 }
 
+.videoPaneHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.videoPaneHeaderRow h2 {
+  margin: 8px 0 6px;
+}
+
+.panelBrandLogo {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+}
+
+.panelBrandLogo.desktop {
+  width: 49px;
+  height: 49px;
+}
+
+.panelBrandLogo.mobile {
+  width: 41px;
+  height: 41px;
+}
+
 video {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #070b12;
+  background: #0f1311;
   margin-bottom: 8px;
 }
 
@@ -131,17 +158,17 @@ video {
   place-items: center;
   align-content: center;
   height: 360px;
-  border: 1px dashed #3a4960;
+  border: 1px dashed #43544b;
   border-radius: 10px;
-  background: #0a101b;
+  background: #111613;
   color: var(--muted);
   margin-bottom: 10px;
   text-align: center;
 }
 
 .onboardingBtn {
-  background: #2d7cff;
-  border-color: #7fb0ff;
+  background: #1f8f5f;
+  border-color: #56b388;
   color: #fff;
   font-weight: 600;
 }
@@ -201,7 +228,7 @@ button:focus-visible {
 }
 
 pre {
-  background: #0e1523;
+  background: #171d1a;
   border: 1px solid var(--line);
   padding: 8px;
   border-radius: 8px;
@@ -223,7 +250,7 @@ summary { cursor: pointer; color: var(--muted); }
 .collapsedPanel {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #0f1726;
+  background: #1a211d;
   padding: 8px 10px;
   margin-top: 0;
 }
@@ -253,9 +280,9 @@ summary { cursor: pointer; color: var(--muted); }
   position: sticky;
   top: -8px;
   z-index: 2;
-  background: #0f1726;
+  background: #1a211d;
   padding: 8px 0;
-  border-bottom: 1px solid #2b3a50;
+  border-bottom: 1px solid #34423b;
   margin-bottom: 8px;
 }
 
@@ -277,12 +304,12 @@ summary { cursor: pointer; color: var(--muted); }
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  background: #0f1726;
+  background: #1a211d;
 }
 
 .treeRootWrap {
   position: relative;
-  border: 1px solid #2b3a50;
+  border: 1px solid #34423b;
   border-radius: 8px;
   padding: 38px 8px 8px;
   max-height: 320px;
@@ -304,7 +331,7 @@ summary { cursor: pointer; color: var(--muted); }
 }
 
 .treeRootHeader {
-  color: #cbd9ef;
+  color: #c9d4cd;
   font-weight: 600;
   margin: 8px 0 4px;
 }
@@ -346,7 +373,7 @@ summary { cursor: pointer; color: var(--muted); }
 select {
   background: var(--bg-soft);
   color: var(--text);
-  border: 1px solid #31435d;
+  border: 1px solid #3a4b43;
   border-radius: 8px;
   padding: 7px 9px;
 }
@@ -361,7 +388,7 @@ select {
 
 .transcriptParagraph {
   border: 1px solid var(--line);
-  background: #0f1726;
+  background: #1a211d;
   border-radius: 10px;
   padding: 12px;
   line-height: 1.8;
@@ -400,7 +427,7 @@ select {
 
 .cleanupPanel {
   border: 1px solid var(--line);
-  background: #0f1726;
+  background: #1a211d;
   border-radius: 10px;
   padding: 10px;
 }
@@ -849,7 +876,7 @@ select {
 .suggestionsPanel {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0f1726;
+  background: #1a211d;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -882,13 +909,20 @@ select {
 }
 
 .settingsModal {
-  width: min(920px, 92vw);
+  width: min(760px, 92vw);
   max-height: 82vh;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #0f1726;
+  background: #1a211d;
   padding: 14px;
+}
+
+.settingsTitle {
+  font-size: clamp(24px, 2.8vw, 30px);
+  line-height: 1.1;
+  letter-spacing: 0.2px;
+  font-weight: 800;
 }
 
 .transcriptSetupModal {
@@ -1133,17 +1167,17 @@ button.settingsActionHalf {
 }
 
 :root[data-theme="light"] .onboardingBtn {
-  background: #3a7bff;
-  border-color: #6f9eff;
+  background: #1f8f5f;
+  border-color: #3dad78;
   color: #fff;
 }
 
 :root[data-theme="light"] .treeNode {
-  color: #202c3f;
+  color: #253129;
 }
 
 :root[data-theme="light"] .treeRootHeader {
-  color: #23344d;
+  color: #2a3a31;
 }
 
 :root[data-theme="light"] .saveSettingsBtn {

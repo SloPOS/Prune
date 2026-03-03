@@ -1169,7 +1169,39 @@ export function App() {
 
   async function copyScriptToClipboard() {
     const text = buildScriptBody(tokens, deleted, scriptIncludeDeleted);
-    if (text) await navigator.clipboard.writeText(text);
+    if (!text) {
+      setToast("Nothing to copy yet.");
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setToast("Script copied to clipboard.");
+        return;
+      }
+      throw new Error("Clipboard API unavailable");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        ta.style.top = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) {
+          setToast("Script copied to clipboard.");
+          return;
+        }
+      } catch {
+        // continue to final error toast below
+      }
+      setToast("Copy failed on this browser. Use Export Script (.txt).");
+    }
   }
 
   useEffect(() => {
@@ -1563,7 +1595,6 @@ export function App() {
               <div className="appMenuDropdown">
                 <button className="themeIconOnlyBtn" title="Toggle light/dark theme" onClick={() => { setIsLightMode((v) => !v); setShowAppMenu(false); }}>{isLightMode ? "🌙" : "☀️"}</button>
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); setShowAppMenu(false); }}>Settings</button>
-                <button title="About Prune" onClick={() => { setShowAboutModal(true); setShowAppMenu(false); }}>About</button>
                 <button title="Save current cut decisions for this media" onClick={() => { void saveProject(); setShowAppMenu(false); }} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); setShowAppMenu(false); }}>Load project</button>
                 <button title="Clear current project and start fresh" onClick={() => { clearProject(); setShowAppMenu(false); }}>Clear project</button>
@@ -1574,7 +1605,10 @@ export function App() {
       )}
       <div className="pane videoPane">
         <div className="mobileMediaSection">
-        <h2>Video</h2>
+        <div className="videoPaneHeaderRow">
+          <h2>Video</h2>
+          <img src={pruneLogo} alt="Prune" className={`panelBrandLogo ${isMobileLayout ? "mobile" : "desktop"}`} />
+        </div>
         <div className="hint">Selected: {videoLabel}</div>
         {videoSrc ? (
           activeMediaKind === "video"
@@ -1714,7 +1748,6 @@ export function App() {
               <div className="row" style={{ marginBottom: 0 }}>
                 <button title="Toggle light/dark theme" onClick={() => setIsLightMode((v) => !v)}>{isLightMode ? "🌙" : "☀️"}</button>
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
-                <button title="About Prune" onClick={() => setShowAboutModal(true)}>About</button>
                 <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
                 <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
@@ -2117,8 +2150,8 @@ export function App() {
     )}
 
     {showAboutModal && (
-      <div className="settingsOverlay" onClick={() => setShowAboutModal(false)}>
-        <div className="settingsModal" style={{ maxWidth: 520, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+      <div className="settingsOverlay" style={{ zIndex: 220 }} onClick={() => setShowAboutModal(false)}>
+        <div className="settingsModal" style={{ maxWidth: 520, textAlign: "center", position: "relative", zIndex: 221 }} onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>About Prune</h3>
             <button title="Close" onClick={() => setShowAboutModal(false)}>✕</button>
@@ -2138,7 +2171,7 @@ export function App() {
       <div className="settingsOverlay" onClick={() => { if (!settingsNeedsSetup) setShowSettings(false); }}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
+            <h3 className="settingsTitle" style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
             <div className="row" style={{ marginBottom: 0 }}>
               <button title="About Prune" onClick={() => setShowAboutModal(true)}>About</button>
               {!settingsNeedsSetup && <button title="Close" onClick={() => setShowSettings(false)}>✕</button>}

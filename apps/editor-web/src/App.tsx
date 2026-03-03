@@ -252,9 +252,15 @@ function normalizeRunningStatus<T extends string>(status: T): T {
 }
 
 async function fetchJsonSafe(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
 function mergeTimeRanges(ranges: TimeRange[]): TimeRange[] {
@@ -1673,6 +1679,10 @@ export function App() {
       }).toString();
       const response = await fetch(`/api/gallery/list?${query}`);
       if (!response.ok) throw new Error(await response.text());
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) {
+        throw new Error("Gallery API returned non-JSON response");
+      }
       const data = await response.json();
       setGalleryItems(Array.isArray(data.items) ? data.items : []);
       setGallerySelected(new Set());

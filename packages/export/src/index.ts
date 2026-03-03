@@ -6,3 +6,6 @@ export { exportEdlCmx3600 } from "./edlCmx3600.js";
 
 export type { PremiereXmlExportOptions } from "./premiereXml.js";
 export { exportPremiereXml } from "./premiereXml.js";
+
+export type { AafBridgeManifest } from "./aafBridge.js";
+export { buildAafBridgeManifest, aafBridgeImporterScript } from "./aafBridge.js";

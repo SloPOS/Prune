@@ -19,7 +19,7 @@
    - Play source with skip map (virtual timeline)
 6. **Exporters**
    - JSON EDL (internal canonical)
-   - FCPXML/EDL/AAF candidate for Resolve import
+   - FCPXML/EDL/Premiere XML direct interchange + AAF bridge package (manifest + OTIO importer script)
 
 ## Data model (canonical)
 

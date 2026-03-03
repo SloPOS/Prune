@@ -119,7 +119,8 @@ Routes:
 - `POST /api/export/premiere/start`
 - `POST /api/export/after-effects-markers/start`
 - `GET /api/export/after-effects-markers/download?jobId=<uuid>`
-- `POST /api/export/aaf/start` (placeholder scaffold status)
+- `POST /api/export/aaf/start` (build AAF bridge package)
+- `GET /api/export/aaf/download?jobId=<uuid>`
 
 Behavior:
 - only two configured roots are allowed (`inbox` and `archive`)
@@ -146,7 +147,21 @@ Export behavior:
 - encoder prefers `h264_qsv` when available and auto-retries with `libx264` on failure
 - poll `GET /api/export/status?jobId=...` for status/logs/output path
 - After Effects export currently writes a JSON marker scaffold intended for scripting/automation workflows (not direct `.aep` injection)
-- AAF export route currently returns explicit `status: "placeholder"` and writes a JSON scaffold (`.aaf.json`); binary AAF output is not implemented yet
+- AAF export generates a downloadable bridge zip (`*-aaf-bridge.zip`) containing `manifest.json`, `import_aaf.py`, and fallback timeline files (`timeline.fcpxml`, `timeline.edl`, `timeline-premiere.xml`)
+- Bridge script creates binary `.aaf` via OpenTimelineIO (`opentimelineio` + `otio-aaf-adapter`), with explicit fallback imports if adapter support is unavailable on a given workstation/NLE build
+
+## AAF bridge validation procedure
+
+1. Export from UI: **Export AAF bridge package**.
+2. Confirm browser downloads `*-aaf-bridge.zip`.
+3. Unzip and run:
+   - `python3 -m pip install opentimelineio otio-aaf-adapter`
+   - `python3 import_aaf.py --manifest manifest.json --out timeline.aaf`
+4. Import `timeline.aaf` into the target NLE.
+5. If your environment cannot write/read AAF, import one of:
+   - `timeline.fcpxml` (Resolve/FCP-compatible)
+   - `timeline.edl` (CMX3600)
+   - `timeline-premiere.xml` (Premiere XML)
 
 ## Immediate next steps
 

@@ -985,7 +985,7 @@ export function App() {
     setExportState((prev) => ({ ...prev, jobId: data.jobId ?? null, status: "done", outputPath: data.outputPath ?? null, error: null, log: data.downloadUrl ? [`Downloaded: ${data.downloadUrl}\n`] : [] }));
   }
 
-  async function exportAafScaffold() {
+  async function exportAafBridgePackage() {
     if (!selectedMedia) return;
     setExportState({ jobId: null, status: "starting", outputPath: null, error: null, log: [] });
     const response = await fetch("/api/export/aaf/start", {
@@ -998,13 +998,14 @@ export function App() {
       return;
     }
     const data = await response.json();
+    if (data.downloadUrl) await autoDownload(data.downloadUrl, `${exportName || "timeline"}-aaf-bridge.zip`);
     const limitations = Array.isArray(data.limitations) ? data.limitations : [];
     setExportState((prev) => ({
       ...prev,
-      status: data.status === "placeholder" ? "done" : "error",
+      status: data.status === "done" ? "done" : "error",
       outputPath: data.outputPath ?? null,
-      error: data.status === "placeholder" ? null : "AAF export failed",
-      log: limitations.length ? limitations.map((line: string) => `${line}\n`) : ["AAF scaffold generated (placeholder).\n"],
+      error: data.status === "done" ? null : "AAF bridge export failed",
+      log: limitations.length ? limitations.map((line: string) => `${line}\n`) : ["AAF bridge package generated.\n"],
     }));
   }
 
@@ -1503,7 +1504,7 @@ export function App() {
               </div>
               <div className="row">
                 <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
-                <button title="Create AAF integration scaffold (placeholder JSON)" onClick={() => void exportAafScaffold()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF scaffold (placeholder)</button>
+                <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF bridge package</button>
               </div>
               <div className="row">
                 <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
@@ -1759,7 +1760,7 @@ export function App() {
           <div className="hint">Detected export options (fast → slow): {exportCapabilities.length === 0 ? "Loading…" : exportCapabilities.map((o) => `${o.format}${o.videoEncoder ? ` (${o.videoEncoder}, ${o.speed})` : " (audio)"}`).join(" • ")}</div>
           <div className="row">
             <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
-            <button title="Create AAF integration scaffold (placeholder JSON)" onClick={() => void exportAafScaffold()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF scaffold (placeholder)</button>
+            <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF bridge package</button>
           </div>
           <h4>Subtitles & Script</h4>
           <div className="row">

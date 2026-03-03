@@ -35,6 +35,11 @@
         { "start": 0, "end": 2, "in": 89999, "out": 90001 },
         { "start": 2, "end": 5, "in": 90025, "out": 90028 }
       ]
+    },
+    "aafBridge": {
+      "fps": 25,
+      "keepRangesCount": 2,
+      "firstKeepRange": { "sourceStartSec": 3599.96, "sourceEndSec": 3600.04, "outputStartSec": 0 }
     }
   }
 }

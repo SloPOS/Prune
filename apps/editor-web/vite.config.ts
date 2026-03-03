@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import { exportFcpxmlV1, type KeepRange } from "../../packages/export/src/fcpxmlV1";
 import { exportEdlCmx3600 } from "../../packages/export/src/edlCmx3600";
 import { exportPremiereXml } from "../../packages/export/src/premiereXml";
+import { buildAafBridgeManifest, aafBridgeImporterScript } from "../../packages/export/src/aafBridge";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 type RootName = string;
@@ -114,6 +115,7 @@ const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
 const edlJobs = new Map<string, EdlExportJob>();
 const premiereXmlJobs = new Map<string, PremiereXmlExportJob>();
 const aeMarkerJobs = new Map<string, MarkerExportJob>();
+const aafBridgeJobs = new Map<string, AafBridgeExportJob>();
 
 function projectsDir(): string {
   return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || path.resolve(REPO_ROOT, "data", "projects"));
@@ -160,6 +162,17 @@ type PremiereXmlExportJob = {
 };
 
 type MarkerExportJob = {
+  id: string;
+  status: "done" | "error";
+  root: RootName;
+  relPath: string;
+  outputPath?: string;
+  outputName: string;
+  error?: string;
+  createdAt: number;
+};
+
+type AafBridgeExportJob = {
   id: string;
   status: "done" | "error";
   root: RootName;
@@ -611,7 +624,7 @@ function sanitizeAeMarkersName(raw: string, sourceRelPath: string): string {
 function sanitizeAafName(raw: string, sourceRelPath: string): string {
   const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
   const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `${base || "edited"}.aaf.json`;
+  return `${base || "edited"}-aaf-bridge.zip`;
 }
 
 function sanitizeScriptName(raw: string): string {
@@ -623,6 +636,16 @@ function sanitizeSubtitleName(raw: string, format: "srt" | "vtt", fallback = "su
   const baseRaw = String(raw || fallback).replace(/\.[^.]+$/, "");
   const base = baseRaw.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${base || fallback}.${format}`;
+}
+
+function createZipWithPython(outputPath: string, cwd: string, files: string[]) {
+  const result = spawnSync("python3", ["-m", "zipfile", "-c", outputPath, ...files], {
+    cwd,
+    encoding: "utf-8",
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "Failed to build zip package");
+  }
 }
 
 function normalizeSubtitleTokens(raw: unknown): Array<{ id: string; text: string; startSec: number; endSec: number }> {
@@ -2221,41 +2244,114 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const exportDir = resolveExportDir();
-          const outputPath = path.join(exportDir, outputName);
-          const payload = {
-            schemaVersion: 1,
-            status: "placeholder",
-            format: "AAF",
-            generatedAtUtc: new Date().toISOString(),
-            source: {
-              root,
-              path: relPath,
-              fileName: path.basename(absMedia),
-            },
-            keepRangeCount: keepRanges.length,
-            limitations: [
-              "This endpoint does not generate a binary .aaf yet.",
-              "Output is a JSON scaffold for integration testing and workflow wiring.",
-              "Track layout, media linking, and AAF essence embedding are not implemented.",
-            ],
-            nextStepHint: "Use FCPXML or EDL for current timeline interchange.",
+          const sourceMetadata = probeSourceMetadata(absMedia);
+          const source = {
+            path: absMedia,
+            name: path.basename(absMedia),
+            fps: sourceMetadata.fps,
+            timecode: sourceMetadata.timecode,
+            durationSec: sourceMetadata.durationSec,
           };
 
+          const manifest = buildAafBridgeManifest(keepRanges as KeepRange[], source);
+          const fcpxml = exportFcpxmlV1(keepRanges as KeepRange[], source, {
+            projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
+            sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
+            eventName: "bit-cut-studio",
+          });
+          const edl = exportEdlCmx3600(keepRanges as KeepRange[], source, {
+            title: outputName.replace(/\.zip$/, "").toUpperCase().slice(0, 64),
+            reel: source.name,
+          });
+          const premiereXml = exportPremiereXml(keepRanges as KeepRange[], source, {
+            projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
+            sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
+          });
+
+          const readme = [
+            "Bit Cut Studio AAF Bridge Package",
+            "",
+            "Contents:",
+            "- manifest.json: normalized timeline ranges",
+            "- import_aaf.py: bridge script to produce binary .aaf via OTIO",
+            "- timeline.fcpxml / timeline.edl / timeline-premiere.xml: direct fallback interchange formats",
+            "",
+            "Quick start:",
+            "1) python3 -m pip install opentimelineio otio-aaf-adapter",
+            "2) python3 import_aaf.py --manifest manifest.json --out timeline.aaf",
+            "3) Import timeline.aaf into Avid/Premiere/Resolve (AAF path depends on host NLE version)",
+            "",
+            "If AAF writing fails on your system, import one of the fallback timeline files.",
+          ].join("\n");
+
+          const exportDir = resolveExportDir();
+          const outputPath = path.join(exportDir, outputName);
           fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-          fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+
+          const tempDir = path.join(exportDir, `.aaf-bridge-${crypto.randomUUID()}`);
+          fs.mkdirSync(tempDir, { recursive: true });
+          try {
+            fs.writeFileSync(path.join(tempDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+            fs.writeFileSync(path.join(tempDir, "import_aaf.py"), aafBridgeImporterScript("manifest.json"), "utf-8");
+            fs.writeFileSync(path.join(tempDir, "timeline.fcpxml"), fcpxml, "utf-8");
+            fs.writeFileSync(path.join(tempDir, "timeline.edl"), edl, "utf-8");
+            fs.writeFileSync(path.join(tempDir, "timeline-premiere.xml"), premiereXml, "utf-8");
+            fs.writeFileSync(path.join(tempDir, "README.txt"), readme, "utf-8");
+            createZipWithPython(outputPath, tempDir, ["manifest.json", "import_aaf.py", "timeline.fcpxml", "timeline.edl", "timeline-premiere.xml", "README.txt"]);
+          } finally {
+            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+          }
+
+          const id = crypto.randomUUID();
+          aafBridgeJobs.set(id, {
+            id,
+            status: "done",
+            root,
+            relPath,
+            outputPath,
+            outputName,
+            createdAt: Date.now(),
+          });
 
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({
-            status: "placeholder",
-            format: "AAF",
+            jobId: id,
+            status: "done",
+            format: "AAF-bridge",
             outputPath,
-            downloadUrl: null,
-            limitations: payload.limitations,
+            downloadUrl: `/api/export/aaf/download?jobId=${id}`,
+            limitations: [
+              "Native binary AAF writing is provided via the included Python bridge script (OpenTimelineIO + otio-aaf-adapter required).",
+              "Fallback FCPXML/EDL/Premiere XML files are included for direct NLE import if AAF conversion is unavailable.",
+            ],
           }));
         } catch (error) {
           res.statusCode = 500;
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to create AAF scaffold" }));
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to create AAF bridge package" }));
+        }
+      });
+
+      server.middlewares.use("/api/export/aaf/download", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const id = url.searchParams.get("jobId") ?? "";
+          const job = aafBridgeJobs.get(id);
+          if (!job || !job.outputPath || !fs.existsSync(job.outputPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Export not found" }));
+            return;
+          }
+
+          const content = fs.readFileSync(job.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/zip");
+          res.setHeader("Content-Disposition", `attachment; filename="${path.basename(job.outputPath)}"`);
+          res.end(content);
+          try { fs.unlinkSync(job.outputPath); } catch {}
+          aafBridgeJobs.delete(id);
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to download AAF bridge package" }));
         }
       });
 

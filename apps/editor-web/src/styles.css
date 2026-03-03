@@ -1010,13 +1010,20 @@ select {
   position: fixed;
   right: 18px;
   bottom: 18px;
-  background: #1c2a40;
-  border: 1px solid #3d5475;
-  color: #e8edf7;
+  background: color-mix(in srgb, #173326 88%, var(--panel) 12%);
+  border: 1px solid color-mix(in srgb, #49c783 65%, var(--line) 35%);
+  color: #ddf7ea;
   padding: 10px 12px;
   border-radius: 10px;
   z-index: 70;
   box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="light"] .toastNotice {
+  background: color-mix(in srgb, #eefaf3 90%, #ffffff 10%);
+  border-color: #86cfa9;
+  color: #1f4b35;
+  box-shadow: 0 8px 20px rgba(30, 84, 60, 0.14);
 }
 
 .spinner {

@@ -23,30 +23,30 @@ Select a word, phrase, or entire paragraph in the transcript to remove it, and P
 ### Desktop Editor
 Take advantage of screen real estate with our split-pane desktop editor. 
 
-![Prune desktop editor](docs/screenshots/desktop-main.png)
+<center>
+  
+<img src="docs/screenshots/Screenshot%202026-03-03%20145216.png"/> 
+
+</center>
 
 ### Mobile Layout
 Edit on the go. Our mobile view features a tabbed layout (Media / Transcript / Tools / Export) with portrait-optimized settings and tab-scoped popups so you never lose your modal state. 
 
-![Prune mobile layout](docs/screenshots/mobile-home.png)
-
-### Mobile App Gallery
-A quick visual sweep of the mobile app across tabs, states, and style variants.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-01.png" alt="Mobile screenshot 01" width="220" /><br /><sub>Screenshot 01 (placeholder caption)</sub></td>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-02.png" alt="Mobile screenshot 02" width="220" /><br /><sub>Screenshot 02 (placeholder caption)</sub></td>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-03.png" alt="Mobile screenshot 03" width="220" /><br /><sub>Screenshot 03 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-01.png" alt="Mobile screenshot 01" width="220" /><br /><sub>Starting page</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-02.png" alt="Mobile screenshot 02" width="220" /><br /><sub>Render in progress</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-03.png" alt="Mobile screenshot 03" width="220" /><br /><sub>Edit in progress</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-04.png" alt="Mobile screenshot 04" width="220" /><br /><sub>Screenshot 04 (placeholder caption)</sub></td>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-05.png" alt="Mobile screenshot 05" width="220" /><br /><sub>Screenshot 05 (placeholder caption)</sub></td>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-06.png" alt="Mobile screenshot 06" width="220" /><br /><sub>Screenshot 06 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-04.png" alt="Mobile screenshot 04" width="220" /><br /><sub>Word gap shortner feature</sub></td> 
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-05.png" alt="Mobile screenshot 05" width="220" /><br /><sub>Smart Cleanup feature</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-06.png" alt="Mobile screenshot 06" width="220" /><br /><sub>Raw output of cut/kept files</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-07.png" alt="Mobile screenshot 07" width="220" /><br /><sub>Screenshot 07 (placeholder caption)</sub></td>
-    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-08.png" alt="Mobile screenshot 08" width="220" /><br /><sub>Screenshot 08 (placeholder caption)</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-07.png" alt="Mobile screenshot 07" width="220" /><br /><sub>Render settings</sub></td>
+    <td align="center"><img src="docs/screenshots/gallery/mobile-screenshot-08.png" alt="Mobile screenshot 08" width="220" /><br /><sub>Dark mode</sub></td>
     <td></td>
   </tr>
 </table>

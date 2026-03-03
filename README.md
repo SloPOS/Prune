@@ -1,86 +1,143 @@
 <div align="center">
-<img src="docs/screenshots/prune-logo.jpg" alt="Prune logo" width="220" />
+  <a href="https://github.com/SloPOS/Prune" target="_blank">
+    <img src="docs/screenshots/prune-logo.jpg" alt="Prune logo" width="220" />
+  </a>
 
-Prune
+  # Prune
+  **Rough cuts at the speed of text.**
 
-Rough cuts at the speed of text.
-
+  [![Made by FauxRhino](https://img.shields.io/badge/Made%20by-FauxRhino-forestgreen?style=flat-square)](mailto:Faux@fauxrhino.com)
+  [![Self-Hosted](https://img.shields.io/badge/Deployment-Self--Hosted-blue?style=flat-square)](#)
 </div>
 
 <br />
 
-Prune is a transcript-based video editor built for self-hosted setups. I got tired of endlessly scrubbing through timelines to find the right takes, so this tool lets you edit video just by deleting text on a screen.
+**Prune** is a transcript-first video editor designed for self-hosted workflows. Instead of endlessly scrubbing through a timeline to find the best takes, Prune lets you edit spoken content by simply editing the words on the screen. 
 
-When you select a word, phrase, or paragraph to remove from the transcript, Prune automatically figures out the exact timeline cuts. You can preview the rough cut right in your browser, render out a quick test video, or export an XML file to finish the project in your usual editor like Premiere or Resolve.
+Select a word, phrase, or entire paragraph in the transcript to remove it, and Prune will automatically generate the precise timeline cuts. From there, you can quickly preview your rough cut and export it directly to media or seamlessly send it to your favorite Non-Linear Editor (NLE) via interchange formats. 
 
-Screenshots
+---
 
-Desktop Editor
+##  See it in Action
 
-A standard split-pane view to take advantage of larger screens.
+### Desktop Editor
+Take advantage of screen real estate with our split-pane desktop editor. 
 
-Mobile Layout
+![Prune desktop editor](docs/screenshots/desktop-main.png)
 
-If you're editing on the go, the mobile view uses a tabbed layout (Media, Transcript, Tools, Export) that remembers where you were so you don't lose your place.
+### Mobile Layout
+Edit on the go. Our mobile view features a tabbed layout (Media / Transcript / Tools / Export) with portrait-optimized settings and tab-scoped popups so you never lose your modal state. 
 
-Features
+![Prune mobile layout](docs/screenshots/mobile-home.png)
 
-Text-based editing: Edit by reading instead of watching. Just click words to cut them, or drag to select and remove entire sections at once.
+---
 
-Local transcription: Uses Whisper STT under the hood. You can choose between different accuracy modes depending on what your local hardware can handle, and it processes everything in the background.
+##  Core Features
 
-Audio cleanup: Includes built-in helpers to automatically detect and shorten silences, or quickly strip out crutch words like "um" and "ah".
+###  Transcript-First Editing
+Visually sculpt your video by reading, not just watching.
+* **Click to Cut:** Simply click words to toggle them between removed and restored.
+* **Bulk Selection:** Use drag-range multi-select on desktop or the dedicated range mode on mobile to cut entire sections at once.
 
-Project saving: Saves your progress locally so you can bounce between projects. It remembers your exact transcript state, deleted tokens, and trim settings.
+###  Built-In AI Transcription
+Powered by Whisper STT, completely integrated into the app.
+* **Tailored Accuracy:** Choose between Fast, Balanced, or Quality preset modes depending on your hardware.
+* **Workflow Friendly:** Features background progress tracking, ETA estimates, and automatic transcript loading the moment processing is complete.
 
-Basic rendering: If you just need a quick trim or to remux a file without even generating a transcript, the render engine can handle that too.
+###  Smart Cleanup & Cut Helpers
+Stop hunting for dead air. Let Prune find it for you.
+* **Silence Removal:** Automatically shorten word gaps.
+* **Crutch Words:** Utilize fixed-phrase cleanup to ditch the "ums" and "ahs".
+* **Audio Polishing:** Take advantage of suggest-only breath and noise detection to keep your audio clean.
 
-Exporting & NLE Support
+###  Robust Project Management
+* **State Persistence:** Save, load, or delete named project states.
+* **Total Recall:** Instantly restore your exact transcript, deleted tokens, and trim settings.
+* **Cross-Platform Files:** Features a server-side folder picker, local upload support, and dedicated directories for your transcripts, projects, and exports.
 
-The goal of Prune is to act as a fast middleman before you do your final polish. It supports sending your timeline data to pretty much any major non-linear editor.
+###  Render Without Transcripts
+Just need a quick conversion? Prune's video/audio render engine supports full-range remux and re-encode workflows even when you haven't loaded a transcript.
 
-Media: Render out a standard .mp4 video.
+---
 
-Interchange formats: Export to DaVinci Resolve/Final Cut Pro (.fcpxml), Premiere Pro (.xml), CMX3600 (.edl), After Effects markers (.json), or an AAF bridge package (.zip).
+##  Export & Interchange
 
-Subtitles: Generate .srt, .vtt, and raw text scripts.
+Prune is designed to be the ultimate middleman between your raw footage and your final polish. 
 
-Note on file handling: Small sidecar exports (like your XMLs or EDLs) will download straight to your browser immediately and are then removed from the server. If you render out an actual media file, it stays cached on the server based on whatever retention window you configure.
+### Media Exports
+* Edited video and audio rendering (`.mp4`)
 
-Getting Started
+### NLE Interchange Formats
+Send your timeline directly to your heavy-duty editor of choice:
+* DaVinci Resolve / Final Cut Pro (`.fcpxml`)
+* Premiere Pro (`.xml`)
+* CMX3600 EDL (`.edl`)
+* After Effects markers (`.json`)
+* AAF bridge package (`.zip`) featuring an OTIO conversion script and fallback timelines
 
-The Quick Way (Recommended)
+### Subtitles & Scripts
+* `.srt`, `.vtt`, and raw script `.txt`
 
-If you have Docker installed, the fastest way to get things running is to pull the repo and spin up the container:
+> **Note on Download/Cache Behavior:** Small sidecar exports (like XML, EDL, JSON) trigger an immediate browser download and are then automatically removed from the server. Larger rendered media exports remain cached on the server, respecting your configured retention window.
 
+---
+
+##  Quick Start & Deployment
+
+### One-Command Installer
+For the fastest automated setup, run our installation script directly in your terminal:
+```bash
+curl -fsSL [https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh](https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh) | bash
+
+```
+
+### Docker Compose (Recommended)
+
+The easiest and most reliable way to run Prune locally is via Docker.
+
+```bash
 git clone [https://github.com/SloPOS/Prune.git](https://github.com/SloPOS/Prune.git)
 cd Prune
 docker compose up -d --build
 
+```
 
-Once the container finishes building, the app will be available at http://localhost:4173.
+**App URL:** Once the container is running, open your browser and head to: `http://localhost:4173`
 
-Alternatively, you can use the automated install script:
+### Manual Local Install
 
-curl -fsSL [https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh](https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh) | bash
+If you prefer to run the environment manually without Docker, ensure your system has the following installed:
 
+* Node.js 20+
+* Python 3.10+
+* ffmpeg + ffprobe (must be added to your system PATH)
 
-Manual Installation
-
-If you'd rather run the environment manually without Docker, make sure you have Node.js 20+, Python 3.10+, and ffmpeg/ffprobe installed and in your system PATH.
-
+```bash
 npm install
 npm run dev -w @prune/editor-web
 
+```
 
-This will start the server and give you a local Vite URL in your terminal.
+Once the server starts, open the local Vite URL shown in your terminal.
 
-Development & Testing
+---
 
-If you're tinkering with the export engines, there are automated checks included to make sure timelines stay accurate across the different formats. You can run them with:
+##  Validation Suites
 
+If you are modifying the export engines, you can run our export-focused automated checks to ensure stability:
+
+```bash
 npm run test:exports
 npm run test:interop
 
+```
 
-Designed by Jacob "FauxRhino" · Reach out at Faux@fauxrhino.com
+These suites validate timeline parity and continuity across all export formats, and run contract checks for the download behaviors.
+
+---
+
+*Designed by Jacob "FauxRhino" · Reach out at [Faux@fauxrhino.com*](mailto:Faux@fauxrhino.com)
+
+```
+
+```

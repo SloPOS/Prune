@@ -1168,6 +1168,40 @@ button.settingsActionHalf {
   font-weight: 600;
 }
 
+.galleryModal {
+  overflow: auto;
+}
+
+.galleryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.galleryCard {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
+  padding: 8px;
+}
+
+.galleryThumb {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111;
+  height: 126px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.galleryThumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .renderStatusBar {
   accent-color: #3fbf7f;
 }

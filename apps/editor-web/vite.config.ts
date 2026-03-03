@@ -263,6 +263,7 @@ function getRootMap(): Record<string, string> {
   const map = Object.fromEntries(studioSettings.roots.map((r) => [r.id, path.resolve(r.path)]));
   if (studioSettings.uploadDir) map["__upload__"] = path.resolve(studioSettings.uploadDir);
   if (studioSettings.transcriptDir) map["__transcripts__"] = path.resolve(studioSettings.transcriptDir);
+  map["__exports__"] = resolveExportDir();
   return map;
 }
 
@@ -1557,6 +1558,96 @@ function studioApiPlugin(): Plugin {
         } catch {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Failed to probe media" }));
+        }
+      });
+
+      server.middlewares.use("/api/gallery/list", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const scope = String(url.searchParams.get("scope") || "both");
+          const showAll = ["1", "true", "yes", "on"].includes(String(url.searchParams.get("showAll") || "").toLowerCase());
+          const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+          const sort = String(url.searchParams.get("sort") || "date_desc");
+          const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 500), 20), 5000);
+
+          const rootMap = getRootMap();
+          const targets: Array<{ root: string; dir: string; kind: "original" | "export" }> = [];
+          if (scope === "originals" || scope === "both") {
+            if (rootMap["__upload__"]) targets.push({ root: "__upload__", dir: rootMap["__upload__"], kind: "original" });
+          }
+          if (scope === "exports" || scope === "both") {
+            if (rootMap["__exports__"]) targets.push({ root: "__exports__", dir: rootMap["__exports__"], kind: "export" });
+          }
+
+          const mediaExt = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".aac", ".flac", ".ogg", ".opus"]);
+          const walk = (start: string): string[] => {
+            const out: string[] = [];
+            const queue = [start];
+            while (queue.length > 0) {
+              const current = queue.shift()!;
+              let entries: fs.Dirent[] = [];
+              try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { continue; }
+              for (const entry of entries) {
+                if (entry.name.startsWith(".")) continue;
+                const abs = path.join(current, entry.name);
+                if (entry.isDirectory()) {
+                  queue.push(abs);
+                  continue;
+                }
+                if (!entry.isFile()) continue;
+                const ext = path.extname(entry.name).toLowerCase();
+                if (!showAll && !mediaExt.has(ext)) continue;
+                out.push(abs);
+                if (out.length >= limit) return out;
+              }
+            }
+            return out;
+          };
+
+          const items: Array<any> = [];
+          for (const target of targets) {
+            const files = walk(target.dir);
+            for (const absPath of files) {
+              const relPath = path.relative(target.dir, absPath);
+              const stat = fs.statSync(absPath);
+              const ext = path.extname(absPath).toLowerCase();
+              const isVideo = [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"].includes(ext);
+              const isAudio = [".mp3", ".wav", ".aac", ".flac", ".ogg", ".opus"].includes(ext);
+              const durationSec = (isVideo || isAudio) ? (probeDurationSec(absPath) ?? null) : null;
+              items.push({
+                id: `${target.root}:${relPath}`,
+                root: target.root,
+                relPath,
+                name: path.basename(absPath),
+                kind: target.kind,
+                sizeBytes: stat.size,
+                modifiedAt: stat.mtime.toISOString(),
+                durationSec,
+                isVideo,
+                isAudio,
+                mediaUrl: `/api/media?${new URLSearchParams({ root: target.root, path: relPath }).toString()}`,
+              });
+            }
+          }
+
+          let filtered = items;
+          if (query) filtered = filtered.filter((item) => item.name.toLowerCase().includes(query));
+          filtered.sort((a, b) => {
+            if (sort === "name_asc") return a.name.localeCompare(b.name);
+            if (sort === "name_desc") return b.name.localeCompare(a.name);
+            if (sort === "duration_desc") return Number(b.durationSec || 0) - Number(a.durationSec || 0);
+            if (sort === "duration_asc") return Number(a.durationSec || 0) - Number(b.durationSec || 0);
+            if (sort === "size_desc") return Number(b.sizeBytes || 0) - Number(a.sizeBytes || 0);
+            if (sort === "size_asc") return Number(a.sizeBytes || 0) - Number(b.sizeBytes || 0);
+            if (sort === "date_asc") return new Date(a.modifiedAt).getTime() - new Date(b.modifiedAt).getTime();
+            return new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
+          });
+
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ items: filtered.slice(0, limit) }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to load gallery" }));
         }
       });
 

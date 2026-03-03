@@ -81,6 +81,19 @@ type AnalysisCandidate = {
   reason: string;
 };
 
+type GalleryItem = {
+  id: string;
+  root: RootName;
+  relPath: string;
+  name: string;
+  kind: "original" | "export";
+  sizeBytes: number;
+  modifiedAt: string;
+  durationSec: number | null;
+  isVideo: boolean;
+  isAudio: boolean;
+  mediaUrl: string;
+};
 
 type GapSuggestion = {
   id: string;
@@ -213,6 +226,16 @@ function formatBytes(bytes: number): string {
     i += 1;
   }
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatDurationShort(seconds?: number | null): string {
+  if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return "—";
+  const total = Math.floor(Number(seconds));
+  const hh = Math.floor(total / 3600);
+  const mm = Math.floor((total % 3600) / 60);
+  const ss = total % 60;
+  if (hh > 0) return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
 function tokenAtTime(tokens: WordToken[], timeSec: number): number {
@@ -360,6 +383,15 @@ export function App() {
   const [showSttPresetMenu, setShowSttPresetMenu] = useState(false);
   const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
+  const [showGalleryModal, setShowGalleryModal] = useState(false);
+  const [galleryScope, setGalleryScope] = useState<"originals" | "exports" | "both">("both");
+  const [galleryShowAllFiles, setGalleryShowAllFiles] = useState(false);
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [gallerySort, setGallerySort] = useState("date_desc");
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [gallerySelected, setGallerySelected] = useState<Set<string>>(new Set());
   const [lastAutoLoadedTranscriptJobId, setLastAutoLoadedTranscriptJobId] = useState<string | null>(null);
   const [filePickerFromTranscriptPrompt, setFilePickerFromTranscriptPrompt] = useState(false);
   const [exportCapabilities, setExportCapabilities] = useState<Array<{ format: string; videoEncoder: string | null; speed: string }>>([]);
@@ -1518,6 +1550,11 @@ export function App() {
     }
   }, [showRenderPanel, mobileTab]);
 
+  useEffect(() => {
+    if (!showGalleryModal) return;
+    void loadGallery();
+  }, [showGalleryModal, galleryScope, galleryShowAllFiles, gallerySearch, gallerySort]);
+
   async function deleteFile(root: RootName, relPath: string) {
     const response = await fetch("/api/files/delete", {
       method: "POST",
@@ -1532,6 +1569,51 @@ export function App() {
     const parentDir = relPath.split("/").slice(0, -1).join("/") || ".";
     await Promise.all([loadDir(root, "."), loadDir(root, parentDir)]);
     if (selectedEntry?.root === root && selectedEntry.relPath === relPath) setSelectedEntry(null);
+  }
+
+  async function loadGallery() {
+    setGalleryLoading(true);
+    setGalleryError(null);
+    try {
+      const query = new URLSearchParams({
+        scope: galleryScope,
+        showAll: galleryShowAllFiles ? "1" : "0",
+        q: gallerySearch,
+        sort: gallerySort,
+        limit: "1200",
+      }).toString();
+      const response = await fetch(`/api/gallery/list?${query}`);
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      setGalleryItems(Array.isArray(data.items) ? data.items : []);
+      setGallerySelected(new Set());
+    } catch (error) {
+      setGalleryError(error instanceof Error ? error.message : "Failed to load gallery");
+    } finally {
+      setGalleryLoading(false);
+    }
+  }
+
+  async function openGalleryItem(item: GalleryItem) {
+    await openFileEntry(item.root, item.relPath);
+    setShowGalleryModal(false);
+    setShowAppMenu(false);
+  }
+
+  function downloadGalleryItem(item: GalleryItem) {
+    window.open(item.mediaUrl, "_blank");
+  }
+
+  async function deleteGalleryItem(item: GalleryItem) {
+    await deleteFile(item.root, item.relPath);
+    await loadGallery();
+  }
+
+  async function deleteSelectedGalleryItems() {
+    const selectedItems = galleryItems.filter((item) => gallerySelected.has(item.id));
+    if (selectedItems.length === 0) return;
+    for (const item of selectedItems) await deleteFile(item.root, item.relPath);
+    await loadGallery();
   }
 
   async function uploadFile(file: File | null) {
@@ -1871,6 +1953,7 @@ export function App() {
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); setShowAppMenu(false); }}>Settings</button>
                 <button title="Save current cut decisions for this media" onClick={() => { void saveProject(); setShowAppMenu(false); }} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); setShowAppMenu(false); }}>Load project</button>
+                <button title="Open media gallery" onClick={() => { setShowGalleryModal(true); setShowAppMenu(false); }}>Gallery</button>
                 <button title="Clear current project and start fresh" onClick={() => { clearProject(); setShowAppMenu(false); }}>Clear project</button>
               </div>
             )}
@@ -2075,6 +2158,7 @@ export function App() {
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
                 <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
+                <button title="Open media gallery" onClick={() => setShowGalleryModal(true)}>Gallery</button>
                 <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
               </div>
 
@@ -2233,6 +2317,87 @@ export function App() {
         </div>
       </div>
     )}
+    {showGalleryModal && (
+      <div className="settingsOverlay" onClick={() => setShowGalleryModal(false)}>
+        <div className="settingsModal galleryModal" style={{ maxWidth: 1100, width: "min(1100px, 96vw)", maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Gallery</h3>
+            <button title="Close" onClick={() => setShowGalleryModal(false)}>✕</button>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <label className="settingsField">Source
+              <select value={galleryScope} onChange={(e) => setGalleryScope(e.target.value as any)}>
+                <option value="originals">Originals</option>
+                <option value="exports">Exports</option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+            <label className="settingsField">Sort
+              <select value={gallerySort} onChange={(e) => setGallerySort(e.target.value)}>
+                <option value="date_desc">Newest first</option>
+                <option value="date_asc">Oldest first</option>
+                <option value="name_asc">Name A → Z</option>
+                <option value="name_desc">Name Z → A</option>
+                <option value="duration_desc">Longest first</option>
+                <option value="duration_asc">Shortest first</option>
+                <option value="size_desc">Largest first</option>
+                <option value="size_asc">Smallest first</option>
+              </select>
+            </label>
+            <label className="settingsField" style={{ flex: "1 1 260px" }}>Search
+              <input value={gallerySearch} onChange={(e) => setGallerySearch(e.target.value)} placeholder="Search filename" />
+            </label>
+            <label className="toggleRow" style={{ margin: 0 }}><input type="checkbox" checked={galleryShowAllFiles} onChange={(e) => setGalleryShowAllFiles(e.target.checked)} />Show all files</label>
+            <button onClick={() => void loadGallery()} disabled={galleryLoading}>Refresh</button>
+          </div>
+
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="hint">{galleryLoading ? "Loading…" : `${galleryItems.length} item${galleryItems.length === 1 ? "" : "s"}`}</div>
+            <div className="row" style={{ gap: 6 }}>
+              <button onClick={() => setGallerySelected(new Set(galleryItems.map((i) => i.id)))} disabled={galleryItems.length === 0}>Select all</button>
+              <button onClick={() => setGallerySelected(new Set())} disabled={gallerySelected.size === 0}>Clear</button>
+              <button onClick={() => void deleteSelectedGalleryItems()} disabled={gallerySelected.size === 0}>Delete selected</button>
+            </div>
+          </div>
+
+          {galleryError && <div className="error" style={{ marginBottom: 8 }}>{galleryError}</div>}
+
+          <div className="galleryGrid">
+            {galleryItems.map((item) => (
+              <div key={item.id} className="galleryCard">
+                <label className="toggleRow" style={{ margin: 0, justifyContent: "space-between" }}>
+                  <span className="hint">{item.kind === "export" ? "Export" : "Original"}</span>
+                  <input type="checkbox" checked={gallerySelected.has(item.id)} onChange={(e) => setGallerySelected((prev) => {
+                    const next = new Set(prev);
+                    if (e.target.checked) next.add(item.id);
+                    else next.delete(item.id);
+                    return next;
+                  })} />
+                </label>
+                <div className="galleryThumb">
+                  {item.isVideo ? (
+                    <video src={item.mediaUrl} muted preload="metadata" controls={false} />
+                  ) : item.isAudio ? (
+                    <div className="hint">Audio</div>
+                  ) : (
+                    <div className="hint">File</div>
+                  )}
+                </div>
+                <div className="cleanupTitle" style={{ marginTop: 6 }}><span>{item.name}</span></div>
+                <div className="hint">{new Date(item.modifiedAt).toLocaleString()}</div>
+                <div className="hint">{formatDurationShort(item.durationSec)} · {formatBytes(item.sizeBytes)}</div>
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  <button onClick={() => void openGalleryItem(item)}>Open</button>
+                  <button onClick={() => downloadGalleryItem(item)}>Download</button>
+                  <button onClick={() => void deleteGalleryItem(item)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
     {showTranscriptSearchModal && (
       <div className="settingsOverlay" onClick={() => setShowTranscriptSearchModal(false)}>
         <div ref={searchModalRef} className="settingsModal" style={{ maxWidth: 620, ...desktopModalStyle(searchModalOffset) }} onClick={(e) => e.stopPropagation()}>

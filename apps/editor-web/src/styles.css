@@ -212,6 +212,14 @@ pre {
 details { margin: 8px 0; }
 summary { cursor: pointer; color: var(--muted); }
 
+.aboutLogo {
+  width: min(100%, 260px);
+  border-radius: 16px;
+  margin: 8px auto 10px;
+  display: block;
+  border: 1px solid var(--line);
+}
+
 .collapsedPanel {
   border: 1px solid var(--line);
   border-radius: 10px;

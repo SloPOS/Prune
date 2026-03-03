@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@prune/core";
+import pruneLogo from "./assets/prune-logo.jpg";
 
 type RootName = string;
 type BrowserEntry = {
@@ -278,6 +279,7 @@ export function App() {
   const [uploadStatus, setUploadStatus] = useState<string>("idle");
   const [uploadProgress, setUploadProgress] = useState<{ active: boolean; loaded: number; total: number; speedBps: number; etaSec: number | null; name: string }>({ active: false, loaded: 0, total: 0, speedBps: 0, etaSec: null, name: "" });
   const [showSettings, setShowSettings] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [settingsNeedsSetup, setSettingsNeedsSetup] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsRootsDraft, setSettingsRootsDraft] = useState<Array<{ name: string; path: string }>>([{ name: "Media", path: "" }]);
@@ -1561,6 +1563,7 @@ export function App() {
               <div className="appMenuDropdown">
                 <button className="themeIconOnlyBtn" title="Toggle light/dark theme" onClick={() => { setIsLightMode((v) => !v); setShowAppMenu(false); }}>{isLightMode ? "🌙" : "☀️"}</button>
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); setShowAppMenu(false); }}>Settings</button>
+                <button title="About Prune" onClick={() => { setShowAboutModal(true); setShowAppMenu(false); }}>About</button>
                 <button title="Save current cut decisions for this media" onClick={() => { void saveProject(); setShowAppMenu(false); }} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); setShowAppMenu(false); }}>Load project</button>
                 <button title="Clear current project and start fresh" onClick={() => { clearProject(); setShowAppMenu(false); }}>Clear project</button>
@@ -1711,6 +1714,7 @@ export function App() {
               <div className="row" style={{ marginBottom: 0 }}>
                 <button title="Toggle light/dark theme" onClick={() => setIsLightMode((v) => !v)}>{isLightMode ? "🌙" : "☀️"}</button>
                 <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
+                <button title="About Prune" onClick={() => setShowAboutModal(true)}>About</button>
                 <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
                 <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
                 <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
@@ -2112,6 +2116,22 @@ export function App() {
       </div>
     )}
 
+    {showAboutModal && (
+      <div className="settingsOverlay" onClick={() => setShowAboutModal(false)}>
+        <div className="settingsModal" style={{ maxWidth: 520, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>About Prune</h3>
+            <button title="Close" onClick={() => setShowAboutModal(false)}>✕</button>
+          </div>
+          <img src={pruneLogo} alt="Prune logo" className="aboutLogo" />
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Prune</div>
+          <div className="hint" style={{ marginBottom: 12 }}>Rough cuts at the speed of text.</div>
+          <div className="hint" style={{ marginBottom: 4 }}>Designed by FauxRhino</div>
+          <div><a href="mailto:Faux@fauxrhino.com">Faux@fauxrhino.com</a></div>
+        </div>
+      </div>
+    )}
+
     {toast && <div className="toastNotice">{toast}</div>}
 
     {showSettings && (
@@ -2119,7 +2139,10 @@ export function App() {
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>{settingsNeedsSetup ? "First-run setup" : "Settings"}</h3>
-            {!settingsNeedsSetup && <button title="Close" onClick={() => setShowSettings(false)}>✕</button>}
+            <div className="row" style={{ marginBottom: 0 }}>
+              <button title="About Prune" onClick={() => setShowAboutModal(true)}>About</button>
+              {!settingsNeedsSetup && <button title="Close" onClick={() => setShowSettings(false)}>✕</button>}
+            </div>
           </div>
           <div className="hint">Set where your media, transcripts, and project files live. Use plain folder names—no technical setup needed.</div>
           <h4 style={{ margin: "8px 0" }}>Media folders</h4>

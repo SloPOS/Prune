@@ -30,6 +30,9 @@ npm run build -w @bit-cut/editor-web
 - Mobile: bottom tab nav (`Media`, `Transcript`, `Tools`, `Export`)
 - Transcript tips are collapsible (`ℹ️` toggle)
 - Search opens in modal on transcript page
+- Tab-scoped modal behavior on mobile (switching tabs hides tab-local popups and restores when returning)
+- Settings popup optimized for portrait with boxed path sections and responsive controls
+- Render video/audio supports no-transcript workflows (full-range keep fallback for remux/re-encode)
 
 ## Export UX behavior
 

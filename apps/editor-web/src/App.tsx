@@ -187,6 +187,18 @@ function formatEta(seconds: number): string {
   return `${mins}m ${secs}s`;
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 function tokenAtTime(tokens: WordToken[], timeSec: number): number {
   for (let i = 0; i < tokens.length; i += 1) {
     const t = tokens[i]!;
@@ -249,6 +261,11 @@ export function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [mobileTab, setMobileTab] = useState<"media" | "transcript" | "tools" | "render">("media");
+  const [filePickerModalTab, setFilePickerModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
+  const [transcriptPromptTab, setTranscriptPromptTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
+  const [transcribeModalTab, setTranscribeModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
+  const [exportModalTab, setExportModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
+  const [renderPanelTab, setRenderPanelTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
   const [roots, setRoots] = useState<RootConfig[]>([]);
@@ -259,6 +276,7 @@ export function App() {
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<TreeSelection>(null);
   const [uploadStatus, setUploadStatus] = useState<string>("idle");
+  const [uploadProgress, setUploadProgress] = useState<{ active: boolean; loaded: number; total: number; speedBps: number; etaSec: number | null; name: string }>({ active: false, loaded: 0, total: 0, speedBps: 0, etaSec: null, name: "" });
   const [showSettings, setShowSettings] = useState(false);
   const [settingsNeedsSetup, setSettingsNeedsSetup] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -292,6 +310,7 @@ export function App() {
   const [renderResolution, setRenderResolution] = useState("source");
   const [renderFps, setRenderFps] = useState("source");
   const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
+  const [mobileRenderSection, setMobileRenderSection] = useState<"video" | "editor" | "subs" | "script">("video");
   const [loadingUiMessage, setLoadingUiMessage] = useState<string | null>(null);
   const [showFilePickerModal, setShowFilePickerModal] = useState(false);
   const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");
@@ -361,8 +380,13 @@ export function App() {
   }, [isLightMode]);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px), (orientation: portrait) and (max-width: 1100px)");
-    const apply = () => setIsMobileLayout(query.matches);
+    const query = window.matchMedia("(max-width: 1100px)");
+    const apply = () => {
+      const ua = navigator.userAgent || "";
+      const isMobileUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const coarse = window.matchMedia("(pointer: coarse)").matches;
+      setIsMobileLayout(Boolean(query.matches && (isMobileUa || coarse)));
+    };
     apply();
     query.addEventListener("change", apply);
     return () => query.removeEventListener("change", apply);
@@ -438,7 +462,8 @@ export function App() {
   }, [exportState.jobId, exportState.status, downloadedExportJobs]);
 
   useEffect(() => {
-    if (!showRenderPanel || !selectedMedia) return;
+    const shouldLoadRenderDetails = Boolean(selectedMedia) && (showRenderPanel || (isMobileLayout && mobileTab === "render"));
+    if (!shouldLoadRenderDetails || !selectedMedia) return;
     const query = new URLSearchParams({ root: selectedMedia.root, path: selectedMedia.path }).toString();
     void fetch(`/api/media/probe?${query}`)
       .then((r) => r.ok ? r.json() : null)
@@ -449,15 +474,21 @@ export function App() {
         if (srcContainer === "mp4" || srcContainer === "mov" || srcContainer === "webm") setRenderContainer(srcContainer);
       })
       .catch(() => setRenderSourceInfo(null));
-  }, [showRenderPanel, selectedMedia?.root, selectedMedia?.path]);
+  }, [showRenderPanel, isMobileLayout, mobileTab, selectedMedia?.root, selectedMedia?.path]);
 
   useEffect(() => {
     if (transcribe.status !== "done" || !transcribe.jobId || !transcribe.transcriptRelPath) return;
     if (!transcriptPickerRoot) return;
     if (lastAutoLoadedTranscriptJobId === transcribe.jobId) return;
     setLastAutoLoadedTranscriptJobId(transcribe.jobId);
-    void loadTranscript(transcriptPickerRoot.id, transcribe.transcriptRelPath, true);
-  }, [transcribe.status, transcribe.jobId, transcribe.transcriptRelPath, transcriptPickerRoot, lastAutoLoadedTranscriptJobId]);
+    void loadTranscript(transcriptPickerRoot.id, transcribe.transcriptRelPath, true).then((ok) => {
+      if (ok) {
+        if (isMobileLayout) setMobileTab("transcript");
+      } else {
+        setToast("Transcription finished, but auto-load failed. Use Browse JSON.");
+      }
+    });
+  }, [transcribe.status, transcribe.jobId, transcribe.transcriptRelPath, transcriptPickerRoot, lastAutoLoadedTranscriptJobId, isMobileLayout]);
 
   useEffect(() => { setActiveTokenIndex(tokenAtTime(tokens, currentTimeSec)); }, [tokens, currentTimeSec]);
   useEffect(() => {
@@ -503,6 +534,11 @@ export function App() {
   const cuts = useMemo(() => mergeTimeRanges([...tokenCuts, ...effectiveGapCuts]), [tokenCuts, effectiveGapCuts]);
   const transcriptDurationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
   const keeps = useMemo(() => keepRangesFromCuts(transcriptDurationSec, cuts), [cuts, transcriptDurationSec]);
+  const renderKeeps = useMemo(() => {
+    if (keeps.length > 0) return keeps;
+    if (videoDurationSec > 0) return [{ sourceStartSec: 0, sourceEndSec: videoDurationSec, startSec: 0, endSec: videoDurationSec } as any];
+    return [];
+  }, [keeps, videoDurationSec]);
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
   const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
 
@@ -931,7 +967,7 @@ export function App() {
         root: selectedMedia.root,
         path: selectedMedia.path,
         outputName: exportName,
-        keepRanges: keeps,
+        keepRanges: renderKeeps,
         cuts,
         render: {
           container: renderContainer,
@@ -1134,6 +1170,46 @@ export function App() {
     if (text) await navigator.clipboard.writeText(text);
   }
 
+  useEffect(() => {
+    if (showFilePickerModal) {
+      setFilePickerModalTab((prev) => prev ?? mobileTab);
+    } else {
+      setFilePickerModalTab(null);
+    }
+  }, [showFilePickerModal, mobileTab]);
+
+  useEffect(() => {
+    if (showTranscriptPrompt) {
+      setTranscriptPromptTab((prev) => prev ?? mobileTab);
+    } else {
+      setTranscriptPromptTab(null);
+    }
+  }, [showTranscriptPrompt, mobileTab]);
+
+  useEffect(() => {
+    if (showTranscribeModal) {
+      setTranscribeModalTab((prev) => prev ?? mobileTab);
+    } else {
+      setTranscribeModalTab(null);
+    }
+  }, [showTranscribeModal, mobileTab]);
+
+  useEffect(() => {
+    if (showExportModal) {
+      setExportModalTab((prev) => prev ?? mobileTab);
+    } else {
+      setExportModalTab(null);
+    }
+  }, [showExportModal, mobileTab]);
+
+  useEffect(() => {
+    if (showRenderPanel) {
+      setRenderPanelTab((prev) => prev ?? mobileTab);
+    } else {
+      setRenderPanelTab(null);
+    }
+  }, [showRenderPanel, mobileTab]);
+
   async function deleteFile(root: RootName, relPath: string) {
     const response = await fetch("/api/files/delete", {
       method: "POST",
@@ -1153,31 +1229,80 @@ export function App() {
   async function uploadFile(file: File | null) {
     if (!file) return;
     setUploadStatus("uploading");
+    setUploadProgress({ active: true, loaded: 0, total: file.size || 0, speedBps: 0, etaSec: null, name: file.name });
+
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/files/upload", { method: "POST", body: form });
-      if (!response.ok) throw new Error(await response.text());
-      const data = await response.json();
-      setUploadStatus(`uploaded: ${data.savedPath ?? data.relPath}`);
+      const data = await new Promise<any>((resolve, reject) => {
+        const form = new FormData();
+        form.append("file", file);
+        const xhr = new XMLHttpRequest();
+        const startedAt = Date.now();
+        xhr.open("POST", "/api/files/upload");
+        xhr.upload.onprogress = (evt) => {
+          if (!evt.lengthComputable) return;
+          const elapsedSec = Math.max(0.1, (Date.now() - startedAt) / 1000);
+          const speed = evt.loaded / elapsedSec;
+          const remaining = Math.max(0, evt.total - evt.loaded);
+          const eta = speed > 0 ? remaining / speed : null;
+          setUploadProgress({ active: true, loaded: evt.loaded, total: evt.total, speedBps: speed, etaSec: eta, name: file.name });
+        };
+        xhr.onerror = () => reject(new Error("upload failed"));
+        xhr.onload = () => {
+          if (xhr.status < 200 || xhr.status >= 300) {
+            reject(new Error(xhr.responseText || `upload failed (${xhr.status})`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(xhr.responseText || "{}"));
+          } catch {
+            reject(new Error("upload response parse failed"));
+          }
+        };
+        xhr.send(form);
+      });
+
+      setUploadProgress((prev) => ({ ...prev, active: false, loaded: prev.total || prev.loaded }));
+      const relPath = String(data.relPath || "").trim();
+      setUploadStatus(`uploaded: ${data.savedPath ?? (relPath || file.name)}`);
       const uploadRoot = String(data.root ?? roots[0]?.id ?? "");
-      const uploadDir = String(data.relPath ?? "").split("/").slice(0, -1).join("/") || ".";
+      const uploadDir = relPath.split("/").slice(0, -1).join("/") || ".";
       await Promise.all(roots.map((r) => loadDir(r.id, ".")));
-      if (uploadRoot) {
-        await loadDir(uploadRoot, uploadDir);
-        setExpandedDirs((prev) => new Set(prev).add(`${uploadRoot}:${uploadDir}`));
-        const relPath = String(data.relPath || "");
-        setSelectedEntry({ root: uploadRoot, relPath, type: "file" });
+      if (!uploadRoot || !relPath) {
+        setToast("Upload completed, but file path was not returned. Refreshing picker.");
+        return;
+      }
+
+      await loadDir(uploadRoot, uploadDir);
+      setExpandedDirs((prev) => new Set(prev).add(`${uploadRoot}:${uploadDir}`));
+      setSelectedEntry({ root: uploadRoot, relPath, type: "file" });
+
+      if (isMobileLayout) {
         if (relPath.toLowerCase().endsWith(".json")) {
           await loadTranscript(uploadRoot, relPath);
           setShowTranscriptPrompt(false);
+          setMobileTab("transcript");
         } else {
-          await openFileEntry(uploadRoot, relPath);
-          setShowTranscriptPrompt(true);
+          // Mobile stability: avoid immediate heavy open/autoload chain right after upload.
+          // Keep user in picker context and let them open explicitly.
+          setShowFilePickerModal(true);
+          setToast("Upload complete. Tap the file to open.");
         }
+        return;
+      }
+
+      if (relPath.toLowerCase().endsWith(".json")) {
+        await loadTranscript(uploadRoot, relPath);
+        setShowTranscriptPrompt(false);
+      } else {
+        await openFileEntry(uploadRoot, relPath);
+        setShowTranscriptPrompt(true);
       }
     } catch (error) {
+      setUploadProgress((prev) => ({ ...prev, active: false }));
       setUploadStatus(`error: ${error instanceof Error ? error.message : "upload failed"}`);
+    } finally {
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+      if (jsonUploadInputRef.current) jsonUploadInputRef.current.value = "";
     }
   }
 
@@ -1383,7 +1508,7 @@ export function App() {
           return (
             <li key={dirKey}>
               <button className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "dir" ? "active" : ""}`} onClick={() => { setSelectedEntry({ root, relPath: entry.relPath, type: "dir" }); void toggleDir(root, entry.relPath); }}>
-                {open ? "▾" : "▸"} 📁 {entry.name}
+                <span aria-hidden>{open ? "▾" : "▸"} 📁</span><span className="treeNodeText">{entry.name}</span>
               </button>
               {open && renderTree(root, entry.relPath, depth + 1)}
             </li>
@@ -1391,7 +1516,7 @@ export function App() {
         })}
         {files.map((entry) => (
           <li key={`${root}:${entry.relPath}`}>
-            <div className="row" style={{ marginBottom: 0, alignItems: "center", gap: 6 }}>
+            <div className="row" style={{ marginBottom: 0, alignItems: "center", gap: 6, flexWrap: "nowrap" }}>
               <button
                 className={`treeNode ${selectedEntry?.root === root && selectedEntry?.relPath === entry.relPath && selectedEntry?.type === "file" ? "active" : ""}`}
                 onClick={() => setSelectedEntry({ root, relPath: entry.relPath, type: "file" })}
@@ -1410,7 +1535,7 @@ export function App() {
                 }}
                 style={{ flex: 1 }}
               >
-                📄 {entry.name}
+                <span aria-hidden>📄</span><span className="treeNodeText">{entry.name}</span>
               </button>
               <button title="Delete file" onClick={() => setConfirmDeleteFile({ root, relPath: entry.relPath })}>🗑</button>
             </div>
@@ -1464,24 +1589,9 @@ export function App() {
         <input ref={uploadInputRef} type="file" accept="video/*,audio/*,.json" style={{ display: "none" }} onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)} />
 
         <label className="toggleRow"><input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />Preview Cuts (skip deleted sections during playback)</label>
-        {isMobileLayout && (
-          <div className="mobileWhisperRow row">
-            <div className="splitBtnWrap">
-              <button className="splitBtnMain" onClick={() => void startTranscription()} disabled={!selectedMedia || transcribe.status === "running" || transcribe.status === "starting"}>{transcribe.status === "running" || transcribe.status === "starting" ? "Transcribing…" : `Run Whisper ${sttPreset === "fast" ? "Fast draft" : sttPreset === "balanced" ? "Balanced" : "Quality"}`}</button>
-              <button className="splitBtnCaret" title="Choose Whisper preset" onClick={() => setShowSttPresetMenuInline((v) => !v)}>▾</button>
-              {showSttPresetMenuInline && (
-                <div className="splitBtnMenu">
-                  <button onClick={() => { setSttPreset("fast"); setShowSttPresetMenuInline(false); }}>Fast draft (tiny)</button>
-                  <button onClick={() => { setSttPreset("balanced"); setShowSttPresetMenuInline(false); }}>Balanced (base)</button>
-                  <button onClick={() => { setSttPreset("quality"); setShowSttPresetMenuInline(false); }}>Quality (small)</button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
         </div>
 
-        <details className="collapsedPanel mobileToolsSection" open={openLeftPanel === "noise"}>
+        <details className="collapsedPanel mediaOnlyPanel" open={openLeftPanel === "noise"}>
           <summary onClick={(e) => { e.preventDefault(); setOpenLeftPanel((prev) => (prev === "noise" ? null : "noise")); }}>
             <strong>Suggest-only Detection (v1)</strong>
             <span className="hint">Candidates: {analysisCandidates.length}</span>
@@ -1507,7 +1617,7 @@ export function App() {
           )}
         </details>
 
-        <details className="collapsedPanel sttPanel mobileToolsSection" open={openLeftPanel === "stt"}>
+        <details className="collapsedPanel sttPanel mediaOnlyPanel" open={openLeftPanel === "stt"}>
           <summary onClick={(e) => { e.preventDefault(); setShowSttPresetMenuInline(false); setOpenLeftPanel((prev) => (prev === "stt" ? null : "stt")); }}>
             <strong>Speech-to-text</strong>
             <span className="hint">Status: {transcribe.status}</span>
@@ -1541,31 +1651,72 @@ export function App() {
           {isMobileLayout ? (
             <div className="mobileExportPanel">
               <div className="hint">Final review and render options.</div>
-              {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
-              <div className="row">
+              <label className="settingsField" style={{ marginBottom: 6 }}>Export file name:
                 <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220, flex: 1 }} title="Base file name for exports" />
-              </div>
-              <div className="row">
-                <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
-                <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
-                <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
-                <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
-              </div>
-              <div className="row">
-                <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export After Effects markers (JSON)</button>
-                <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export AAF bridge package</button>
-              </div>
-              <div className="row">
-                <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
-                <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
-                <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
-                <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
-              </div>
+              </label>
+
+              <details className="collapsedPanel" open={mobileRenderSection === "video"}>
+                <summary onClick={(e) => { e.preventDefault(); setMobileRenderSection("video"); }}><strong>Render video/audio</strong></summary>
+                <div className="hint" style={{ marginBottom: 6 }}><strong>Source details</strong></div>
+                <div className="row" style={{ marginBottom: 4 }}><span className="hint">Container:</span><strong>{renderSourceInfo?.container || "—"}</strong></div>
+                <div className="row" style={{ marginBottom: 4 }}><span className="hint">Video codec:</span><strong>{renderSourceInfo?.videoCodec || "—"}</strong></div>
+                <div className="row" style={{ marginBottom: 4 }}><span className="hint">Resolution:</span><strong>{renderSourceInfo?.width && renderSourceInfo?.height ? `${renderSourceInfo.width}×${renderSourceInfo.height}` : "—"}</strong></div>
+                <div className="row" style={{ marginBottom: 4 }}><span className="hint">Framerate:</span><strong>{renderSourceInfo?.fps ? `${Number(renderSourceInfo.fps).toFixed(3)} fps` : "—"}</strong></div>
+                <div className="row" style={{ marginBottom: 4 }}><span className="hint">Audio:</span><strong>{renderSourceInfo?.audioCodec || "none"}{renderSourceInfo?.audioChannels ? ` · ${renderSourceInfo.audioChannels}ch` : ""}{renderSourceInfo?.audioSampleRate ? ` · ${renderSourceInfo.audioSampleRate}Hz` : ""}</strong></div>
+                <div className="row">
+                  <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
+                  <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
+                </div>
+                <div className="row">
+                  <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
+                  <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
+                </div>
+                <div className="row">
+                  <button title="Render cut media file" onClick={() => void startExport()} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+                </div>
+              </details>
+
+              <details className="collapsedPanel" open={mobileRenderSection === "editor"}>
+                <summary onClick={(e) => { e.preventDefault(); setMobileRenderSection("editor"); }}><strong>Export editor file</strong></summary>
+                <div className="row">
+                  <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Resolve FCPXML</button>
+                  <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>EDL (CMX3600)</button>
+                  <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Premiere XML</button>
+                  <button title="Export AAF bridge package (includes importer script + fallback timelines)" onClick={() => void exportAafBridgePackage()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>AAF bridge package</button>
+                </div>
+              </details>
+
+              <details className="collapsedPanel" open={mobileRenderSection === "subs"}>
+                <summary onClick={(e) => { e.preventDefault(); setMobileRenderSection("subs"); }}><strong>Export subtitles</strong></summary>
+                <div className="row">
+                  <button onClick={() => void exportSubtitles("srt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .srt</button>
+                  <button onClick={() => void exportSubtitles("vtt")} disabled={subtitleExport.status === "working" || tokens.length === 0}>Export .vtt</button>
+                </div>
+              </details>
+
+              <details className="collapsedPanel" open={mobileRenderSection === "script"}>
+                <summary onClick={(e) => { e.preventDefault(); setMobileRenderSection("script"); }}><strong>Export script</strong></summary>
+                <div className="row">
+                  <button onClick={() => void exportScriptTxt()} disabled={scriptExport.status === "working" || tokens.length === 0}>Export Script (.txt)</button>
+                  <button onClick={() => void copyScriptToClipboard()} disabled={tokens.length === 0}>Copy Script</button>
+                  <button title="Export JSON markers for After Effects scripting workflows" onClick={() => void exportAfterEffectsMarkersJson()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>AE markers (JSON)</button>
+                </div>
+              </details>
+
               <div className="hint">Export status: {exportState.status}{exportState.error ? ` — ${exportState.error}` : ""}</div>
               {exportState.outputPath && <div className="hint">Output path: {exportState.outputPath}</div>}
             </div>
           ) : (
-            <button className="exportBigButton" title="Review final cut preview and export options" onClick={() => setShowExportModal(true)}>Render</button>
+            <>
+              <div className="row" style={{ marginBottom: 0 }}>
+                <button title="Toggle light/dark theme" onClick={() => setIsLightMode((v) => !v)}>{isLightMode ? "🌙" : "☀️"}</button>
+                <button title="Open app settings" onClick={() => { setShowSettings(true); void loadSettingsHealth(); }}>Settings</button>
+                <button title="Save current cut decisions for this media" onClick={() => void saveProject()} disabled={!selectedMedia}>Save project</button>
+                <button title="Load a previously saved project" onClick={() => { setShowLoadProjectModal(true); void refreshSavedProjects(); }}>Load project</button>
+                <button title="Clear current project and start fresh" onClick={() => clearProject()}>Clear project</button>
+              </div>
+              <button className="exportBigButton" title="Review final cut preview and render options" onClick={() => setShowExportModal(true)}>Render</button>
+            </>
           )}
         </div>
       </div>
@@ -1594,15 +1745,27 @@ export function App() {
         </div>
         {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. Double-click a word to play from it.</div>}
 
-        <p className="transcriptParagraph">
-          {tokens.map((t, index) => {
-            const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
-            return <span key={t.id}><button data-token-index={index} onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
-          })}
-        </p>
+        {tokens.length === 0 ? (
+          <div className="transcriptParagraph" style={{ display: "grid", placeItems: "center", textAlign: "center" }}>
+            <div>
+              <div className="hint" style={{ marginBottom: 8 }}>No transcript loaded yet.</div>
+              <div className="row" style={{ justifyContent: "center", marginBottom: 0 }}>
+                <button title="Browse server files for transcript JSON" onClick={() => { setFilePickerIntent("json"); setFilePickerShowAll(false); setFilePickerFromTranscriptPrompt(false); setShowFilePickerModal(true); if (transcriptPickerRoot) void loadDir(transcriptPickerRoot.id, "."); }}>Browse JSON</button>
+                <button title="Upload transcript JSON from this device" onClick={() => jsonUploadInputRef.current?.click()}>Upload JSON</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="transcriptParagraph">
+            {tokens.map((t, index) => {
+              const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
+              return <span key={t.id}><button data-token-index={index} onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
+            })}
+          </p>
+        )}
         </div>
 
-        <div className="toolsStack mobileToolsSection">
+        <div className="toolsStack mobileTranscriptToolsSection">
           <details className="collapsedPanel" open={openToolPanel === "smart"}>
             <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "smart" ? null : "smart")); }}>
               <strong>Smart Cleanup</strong>
@@ -1632,7 +1795,7 @@ export function App() {
             </aside>
           </details>
 
-          <details className="collapsedPanel" open={openToolPanel === "gap"}>
+          <details className="collapsedPanel gapPanel" open={openToolPanel === "gap"}>
             <summary onClick={(e) => { e.preventDefault(); setOpenToolPanel((prev) => (prev === "gap" ? null : "gap")); }}>
               <strong>Word-gap shortener</strong>
               <span className="hint">Suggestions {gapSuggestions.length} · Applied trims {appliedGapCuts.length}</span>
@@ -1683,6 +1846,21 @@ export function App() {
 
       </div>
     </div>
+    {uploadProgress.active && (
+      <div className="settingsOverlay" style={{ zIndex: 86 }}>
+        <div className="settingsModal" style={{ maxWidth: 460, textAlign: "center" }}>
+          <div className="spinner" />
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Uploading {uploadProgress.name}</div>
+          <progress max={Math.max(1, uploadProgress.total)} value={uploadProgress.loaded} style={{ width: "100%", height: 12 }} />
+          <div className="hint" style={{ marginTop: 8 }}>
+            {uploadProgress.total > 0 ? `${((uploadProgress.loaded / uploadProgress.total) * 100).toFixed(1)}%` : "Working…"}
+            {` · ${formatBytes(uploadProgress.loaded)} / ${formatBytes(uploadProgress.total)}`}
+            {` · ${formatBytes(uploadProgress.speedBps)}/s`}
+            {` · ETA ${uploadProgress.etaSec !== null ? formatEta(uploadProgress.etaSec) : "--"}`}
+          </div>
+        </div>
+      </div>
+    )}
     {loadingUiMessage && (
       <div className="settingsOverlay" style={{ zIndex: 85 }}>
         <div className="settingsModal" style={{ maxWidth: 420, textAlign: "center" }}>
@@ -1711,7 +1889,7 @@ export function App() {
       </div>
     )}
 
-    {showFilePickerModal && (
+    {showFilePickerModal && (!isMobileLayout || mobileTab === filePickerModalTab) && (
       <div className="settingsOverlay" onClick={() => { setShowFilePickerModal(false); setFilePickerFromTranscriptPrompt(false); }}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1756,7 +1934,7 @@ export function App() {
       </div>
     )}
 
-    {showTranscriptPrompt && selectedMedia && (
+    {showTranscriptPrompt && selectedMedia && (!isMobileLayout || mobileTab === transcriptPromptTab) && (
       <div className="settingsOverlay" onClick={() => { setShowTranscriptPrompt(false); setShowSttPresetMenu(false); }}>
         <div className="settingsModal transcriptSetupModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1783,7 +1961,7 @@ export function App() {
       </div>
     )}
 
-    {showTranscribeModal && (transcribe.status === "running" || transcribe.status === "starting") && (
+    {showTranscribeModal && (transcribe.status === "running" || transcribe.status === "starting") && (!isMobileLayout || mobileTab === transcribeModalTab) && (
       <div className="settingsOverlay" onClick={() => setShowTranscribeModal(false)}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1799,7 +1977,7 @@ export function App() {
       </div>
     )}
 
-    {showRenderPanel && (
+    {showRenderPanel && (!isMobileLayout || mobileTab === renderPanelTab) && (
       <div className="settingsOverlay" onClick={() => setShowRenderPanel(false)}>
         <div className="settingsModal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1840,7 +2018,7 @@ export function App() {
       </div>
     )}
 
-    {showExportModal && !showRenderPanel && (
+    {showExportModal && !showRenderPanel && (!isMobileLayout || mobileTab === exportModalTab) && (
       <div className="settingsOverlay" onClick={() => setShowExportModal(false)}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1849,9 +2027,11 @@ export function App() {
           </div>
           <div className="hint">Final review and render options.</div>
           {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
-          <div className="row">
-            <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
-            <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+          <div className="row" style={{ alignItems: "center" }}>
+            <label className="settingsField" style={{ minWidth: 260 }}>Export file name:
+              <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
+            </label>
+            <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
             <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
             <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
             <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
@@ -1946,45 +2126,59 @@ export function App() {
           {settingsRootsDraft.map((root, index) => {
             const healthState = settingsDraftRootHealth[index] ?? "checking";
             return (
-            <div key={`root-${index}`} className="row">
+            <div key={`root-${index}`} className="settingsRootCard">
+              <div className="settingsFolderLabel">Media folder #{index + 1}</div>
               <input placeholder="Media folder name" value={root.name} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, name: e.target.value } : r))} />
-              <input placeholder="Folder path" style={{ minWidth: 320, flex: 1 }} value={root.path} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: e.target.value } : r))} />
-              <button onClick={() => void browseForPath((value) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: value } : r)), root.path)}>Browse…</button>
-              <button onClick={() => setSettingsRootsDraft((prev) => prev.filter((_, i) => i !== index))} disabled={settingsRootsDraft.length <= 1}>Remove</button>
-              <span className={`healthBadge ${healthState === "ok" ? "ok" : "warn"}`}>{healthState === "checking" ? "Checking…" : healthState === "ok" ? "Folder OK" : "Folder not found"}</span>
+              <div className="row settingsPathRow">
+                <input className="settingsPathInput" placeholder="Folder path" style={{ flex: 1 }} value={root.path} onChange={(e) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: e.target.value } : r))} />
+              </div>
+              <div className="row settingsPathActionsRow">
+                <button className="settingsActionHalf" onClick={() => void browseForPath((value) => setSettingsRootsDraft((prev) => prev.map((r, i) => i === index ? { ...r, path: value } : r)), root.path)}>...</button>
+                <button className="settingsActionHalf" onClick={() => setSettingsRootsDraft((prev) => prev.filter((_, i) => i !== index))} disabled={settingsRootsDraft.length <= 1}>Remove</button>
+              </div>
+              <span className={`healthBadge settingsHealthFull ${healthState === "ok" ? "ok" : "warn"}`}>{healthState === "checking" ? "Checking…" : healthState === "ok" ? "Folder OK" : "Folder not found"}</span>
             </div>
           );})}
           <div className="row">
             <button onClick={() => setSettingsRootsDraft((prev) => [...prev, { name: `Media ${prev.length + 1}`, path: "" }])}>Add media folder</button>
           </div>
           <h4 style={{ margin: "8px 0" }}>Working folders</h4>
-          <div className="row settingsFolderRow">
-            <input value="Upload" disabled className="settingsKindInput" />
-            <input className="settingsPathInput" value={settingsUploadDir} onChange={(e) => setSettingsUploadDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/uploads" />
-            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsUploadDir(value), settingsUploadDir)}>Browse…</button>
+          <div className="settingsFolderRow">
+            <div className="settingsFolderLabel">Upload</div>
+            <div className="row settingsPathRow">
+              <input className="settingsPathInput" value={settingsUploadDir} onChange={(e) => setSettingsUploadDir(e.target.value)} style={{ flex: 1 }} placeholder="/path/to/uploads" />
+              <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsUploadDir(value), settingsUploadDir)}>...</button>
+            </div>
             {settingsHealth?.upload && <span className={`healthBadge ${settingsHealth.upload.exists && settingsHealth.upload.writable ? "ok" : "warn"}`}>{!settingsHealth.upload.exists ? "Folder missing" : settingsHealth.upload.writable ? "Folder OK" : "Write protected"}</span>}
           </div>
-          <div className="row settingsFolderRow">
-            <input value="Whisper Transcripts" disabled className="settingsKindInput" />
-            <input className="settingsPathInput" value={settingsTranscriptDir} onChange={(e) => setSettingsTranscriptDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/transcripts" />
-            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsTranscriptDir(value), settingsTranscriptDir)}>Browse…</button>
+          <div className="settingsFolderRow">
+            <div className="settingsFolderLabel">Whisper Transcripts</div>
+            <div className="row settingsPathRow">
+              <input className="settingsPathInput" value={settingsTranscriptDir} onChange={(e) => setSettingsTranscriptDir(e.target.value)} style={{ flex: 1 }} placeholder="/path/to/transcripts" />
+              <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsTranscriptDir(value), settingsTranscriptDir)}>...</button>
+            </div>
             {settingsHealth?.transcripts && <span className={`healthBadge ${settingsHealth.transcripts.exists && settingsHealth.transcripts.writable ? "ok" : "warn"}`}>{!settingsHealth.transcripts.exists ? "Folder missing" : settingsHealth.transcripts.writable ? "Folder OK" : "Write protected"}</span>}
           </div>
-          <div className="row settingsFolderRow">
-            <input value="Project Files" disabled className="settingsKindInput" />
-            <input className="settingsPathInput" value={settingsProjectsDir} onChange={(e) => setSettingsProjectsDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/projects" />
-            <button className="settingsBrowseBtn settingsBrowseWide" onClick={() => void browseForPath((value) => setSettingsProjectsDir(value), settingsProjectsDir)}>Browse…</button>
+          <div className="settingsFolderRow">
+            <div className="settingsFolderLabel">Project Files</div>
+            <div className="row settingsPathRow">
+              <input className="settingsPathInput" value={settingsProjectsDir} onChange={(e) => setSettingsProjectsDir(e.target.value)} style={{ flex: 1 }} placeholder="/path/to/projects" />
+              <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsProjectsDir(value), settingsProjectsDir)}>...</button>
+            </div>
             {settingsHealth?.projects && <span className={`healthBadge ${settingsHealth.projects.exists && settingsHealth.projects.writable ? "ok" : "warn"}`}>{!settingsHealth.projects.exists ? "Folder missing" : settingsHealth.projects.writable ? "Folder OK" : "Write protected"}</span>}
           </div>
-          <div className="row settingsFolderRow">
-            <input value="Export Cache" disabled className="settingsKindInput" />
-            <input className="settingsPathInput" value={settingsExportDir} onChange={(e) => setSettingsExportDir(e.target.value)} style={{ minWidth: 320, flex: 1 }} placeholder="/path/to/export-cache" />
-            <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsExportDir(value), settingsExportDir)}>Browse…</button>
-            <button className="settingsBrowseBtn clearCacheBtn" title="Delete cached rendered video files from export directory" onClick={() => void clearVideoExportCache()}>Clear cache</button>
+          <div className="settingsFolderRow">
+            <div className="settingsFolderLabel">Export Cache</div>
+            <div className="row settingsPathRow">
+              <input className="settingsPathInput" value={settingsExportDir} onChange={(e) => setSettingsExportDir(e.target.value)} style={{ flex: 1 }} placeholder="/path/to/export-cache" />
+              <button className="settingsBrowseBtn" onClick={() => void browseForPath((value) => setSettingsExportDir(value), settingsExportDir)}>...</button>
+              </div>
             {settingsHealth?.export && <span className={`healthBadge ${settingsHealth.export.exists && settingsHealth.export.writable ? "ok" : "warn"}`}>{!settingsHealth.export.exists ? "Folder missing" : settingsHealth.export.writable ? "Folder OK" : "Write protected"}</span>}
           </div>
-          <div className="row" style={{ alignItems: "center" }}>
-            <label className="settingsField" style={{ minWidth: 240 }}>Auto-delete cache after<select value={settingsExportCacheHours} onChange={(e) => setSettingsExportCacheHours(e.target.value)}>
+          <div className="settingsFolderLabel">Auto-delete cache after</div>
+          <div className="row settingsPathActionsRow" style={{ alignItems: "end" }}>
+            <label className="settingsField settingsActionHalf" style={{ minWidth: 0 }}>
+              <select value={settingsExportCacheHours} onChange={(e) => setSettingsExportCacheHours(e.target.value)} style={{ width: "100%" }}>
                 <option value="0">Never</option>
                 <option value="24">24h</option>
                 <option value="48">48h</option>
@@ -1993,6 +2187,7 @@ export function App() {
                 <option value="336">14d</option>
               </select>
             </label>
+            <button className="settingsBrowseBtn clearCacheBtn settingsActionHalf" style={{ width: "100%", minWidth: 0, height: 36 }} title="Delete cached rendered video files from export directory" onClick={() => void clearVideoExportCache()}>Clear cache</button>
           </div>
           {settingsError && <div className="error">{settingsError}</div>
           }

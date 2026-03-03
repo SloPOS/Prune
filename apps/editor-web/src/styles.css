@@ -221,12 +221,17 @@ summary { cursor: pointer; color: var(--muted); }
 }
 
 .collapsedPanel[open] {
-  max-height: 280px;
+  max-height: 100%;
   overflow: auto;
 }
 
 .collapsedPanel.sttPanel[open] {
-  overflow: visible;
+  overflow: auto;
+}
+
+.collapsedPanel.gapPanel[open] {
+  max-height: 100%;
+  overflow: auto;
 }
 
 .collapsedPanel > summary {
@@ -309,6 +314,20 @@ summary { cursor: pointer; color: var(--muted); }
   background: transparent;
   padding: 6px 8px;
   border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.treeNodeText {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
+  scrollbar-width: thin;
 }
 
 .treeNode.active {
@@ -507,16 +526,18 @@ select {
     display: flex;
   }
 
-  .mobileLayout.mobile-media .mobileToolsSection,
   .mobileLayout.mobile-media .mobileExportSection {
     display: none;
   }
 
-  .mobileLayout.mobile-transcript .mobileToolsSection,
+  .mobileLayout.mobile-transcript .mobileTranscriptToolsSection,
   .mobileLayout.mobile-transcript .mobileExportSection,
   .mobileLayout.mobile-tools .mobileTranscriptSection,
+  .mobileLayout.mobile-tools .mobileExportSection,
+  .mobileLayout.mobile-tools .videoPane .mobileMediaSection,
   .mobileLayout.mobile-render .mobileMediaSection,
-  .mobileLayout.mobile-render .mobileToolsSection {
+  .mobileLayout.mobile-render .videoPane .mediaOnlyPanel,
+  .mobileLayout.mobile-render .mobileTranscriptToolsSection {
     display: none !important;
   }
 
@@ -538,6 +559,15 @@ select {
     margin-bottom: 6px;
   }
 
+  .mobileLayout .videoPlaceholder {
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 10px;
+  }
+
   .mobileLayout .mobileInlinePlayer .videoFrame16x9 {
     max-height: 24vh;
   }
@@ -551,6 +581,64 @@ select {
     max-width: 100%;
   }
 
+  .mobileLayout .settingsFolderRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .mobileLayout .settingsPathRow {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .mobileLayout .settingsFolderLabel {
+    width: 100%;
+  }
+
+  .mobileLayout .settingsPathInput {
+    min-width: 0 !important;
+    flex: 1 1 auto;
+    width: 100% !important;
+  }
+
+  .mobileLayout .settingsFolderRow .settingsPathInput[style] {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+
+  .mobileLayout .settingsBrowseBtn:not(.clearCacheBtn) {
+    min-width: 18px;
+    width: 18px;
+    height: 24px;
+    padding: 0;
+    line-height: 1;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    border-radius: 6px;
+  }
+
+  @media (orientation: portrait) {
+    .mobileLayout .settingsFolderLabel {
+      width: 100%;
+    }
+
+    .mobileLayout .settingsPathInput,
+    .mobileLayout .settingsFolderRow .settingsPathInput[style] {
+      flex: 1 1 auto !important;
+      width: auto !important;
+      min-width: 0 !important;
+    }
+
+    .mobileLayout .healthBadge {
+      width: 100%;
+    }
+  }
+
   .mobileLayout input,
   .mobileLayout select,
   .mobileLayout button,
@@ -559,6 +647,18 @@ select {
   .mobileLayout .settingsModal,
   .mobileLayout .pickerPanel {
     max-width: 100%;
+  }
+
+  .mobileLayout .settingsModal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: 90vh;
+    overflow: auto;
+  }
+
+  .mobileLayout .settingsPathRow {
+    width: 100%;
+    min-width: 0;
   }
 
   .mobileLayout input[style],
@@ -593,6 +693,9 @@ select {
   .mobileLayout .transcriptParagraph {
     height: auto;
     flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     min-height: 120px;
   }
 
@@ -613,6 +716,13 @@ select {
   .mobileLayout .videoFrame16x9 {
     max-height: 42vh;
   }
+}
+
+.mobileLayout .mobileTranscriptSection {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: auto !important;
 }
 
 .videoPane { overflow: auto; display: flex; flex-direction: column; min-width: 420px; }
@@ -682,10 +792,19 @@ select {
   gap: 6px;
 }
 .transcriptPane { display: flex; flex-direction: column; min-height: 0; min-width: 520px; overflow: hidden; }
-.transcriptParagraph {
-  min-height: 180px;
-  height: 40%;
+.mobileTranscriptSection {
+  display: flex;
+  flex-direction: column;
   flex: 0 0 40%;
+  min-height: 0;
+  overflow: hidden;
+}
+.transcriptParagraph {
+  min-height: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
 }
 .cleanupPanel { max-height: none; overflow: visible; }
@@ -702,6 +821,23 @@ select {
   padding-right: 2px;
 }
 
+.toolsStack .collapsedPanel {
+  display: block;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.toolsStack .collapsedPanel[open] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.toolsStack .collapsedPanel > summary {
+  flex: 0 0 auto;
+}
+
 .suggestionsPanel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -710,8 +846,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 220px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   margin-bottom: 12px;
 }
 
@@ -818,20 +954,55 @@ select {
   height: 36px;
 }
 
+.settingsRootCard,
 .settingsFolderRow {
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--bg-soft) 85%, transparent);
+  margin-bottom: 8px;
 }
 
-.settingsKindInput {
-  width: 170px;
-  height: 36px;
+.settingsFolderLabel {
+  font-size: 12px;
+  color: var(--muted);
   font-weight: 600;
-  background: color-mix(in srgb, var(--bg-soft) 88%, var(--accent) 12%);
 }
 
-.settingsKindInput:disabled {
-  opacity: 1;
-  color: var(--text);
+.settingsPathRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.settingsPathActionsRow {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  flex-wrap: nowrap !important;
+}
+
+.settingsActionHalf {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+button.settingsActionHalf {
+  width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settingsHealthFull {
+  display: inline-flex;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .settingsBrowseBtn {
@@ -845,6 +1016,11 @@ select {
 
 .settingsBrowseWide {
   min-width: 132px;
+}
+
+.mobileLayout .settingsBrowseWide:not(.clearCacheBtn) {
+  min-width: 18px !important;
+  width: 18px !important;
 }
 
 .clearCacheBtn {
@@ -910,7 +1086,32 @@ select {
 }
 
 :root[data-theme="light"] .hint {
-  color: #5f6e84;
+  color: #4e5e76;
+}
+
+:root[data-theme="light"] summary,
+:root[data-theme="light"] .collapsedPanel > summary,
+:root[data-theme="light"] .collapsedPanel > summary .hint {
+  color: #253349;
+}
+
+:root[data-theme="light"] .cleanupTitle {
+  color: #1f2b3d;
+}
+
+:root[data-theme="light"] .cleanupTitle .count {
+  color: #445772;
+}
+
+:root[data-theme="light"] .cleanupItem,
+:root[data-theme="light"] .suggestionItem {
+  color: #243247;
+}
+
+:root[data-theme="light"] pre {
+  background: #f7f9fc;
+  border-color: #d9dee8;
+  color: #1d2430;
 }
 
 :root[data-theme="light"] .videoPlaceholder {

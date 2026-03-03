@@ -76,7 +76,7 @@ type ExportJob = {
   relPath: string;
   outputName: string;
   outputPath: string;
-  encoder?: "h264_qsv" | "libx264";
+  encoder?: string;
   startedAt: number;
   endedAt?: number;
   exitCode?: number | null;
@@ -332,10 +332,11 @@ function resolveExportDir(): string {
   }
 }
 
-function sanitizeOutputName(raw: string, sourceRelPath: string): string {
+function sanitizeOutputName(raw: string, sourceRelPath: string, extension = "mp4"): string {
   const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
   const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `${base || "edited"}.mp4`;
+  const ext = extension.replace(/[^a-zA-Z0-9]/g, "") || "mp4";
+  return `${base || "edited"}.${ext}`;
 }
 
 function projectKey(root: string, relPath: string): string {
@@ -868,15 +869,29 @@ function estimateTranscribeStatus(job: TranscribeJob): { percent: number | null;
   };
 }
 
-function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: { startSec: number; endSec: number }[], encoder: "h264_qsv" | "libx264", hasAudio: boolean): string[] {
+type RenderOptions = {
+  encoder: string;
+  container: "mp4" | "mov" | "webm";
+  fps?: number;
+  width?: number;
+  height?: number;
+};
+
+function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: { startSec: number; endSec: number }[], opts: RenderOptions, hasAudio: boolean): string[] {
   const trim = (n: number) => Number(n.toFixed(3));
+  const size = opts.width && opts.height ? `${Math.max(2, Math.round(opts.width))}x${Math.max(2, Math.round(opts.height))}` : null;
+  const audioCodec = opts.container === "webm" ? "libopus" : "aac";
 
   if (keepRanges.length === 1) {
     const r = keepRanges[0];
-    const args = ["-y", "-hide_banner", "-i", absInput, "-ss", `${trim(r.startSec)}`, "-to", `${trim(r.endSec)}`, "-c:v", encoder, "-preset", "veryfast"];
-    if (hasAudio) args.push("-c:a", "aac");
+    const args = ["-y", "-hide_banner", "-i", absInput, "-ss", `${trim(r.startSec)}`, "-to", `${trim(r.endSec)}`, "-c:v", opts.encoder];
+    if (opts.encoder === "libx264" || opts.encoder === "libx265") args.push("-preset", "veryfast");
+    if (opts.fps && opts.fps > 0) args.push("-r", `${opts.fps}`);
+    if (size) args.push("-s", size);
+    if (hasAudio) args.push("-c:a", audioCodec);
     else args.push("-an");
-    args.push("-movflags", "+faststart", outputPath);
+    if (opts.container === "mp4" || opts.container === "mov") args.push("-movflags", "+faststart");
+    args.push(outputPath);
     return args;
   }
 
@@ -893,15 +908,25 @@ function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: {
     }
   });
 
-  filterParts.push(`${concatInputs.join("")}concat=n=${keepRanges.length}:v=1:a=${hasAudio ? 1 : 0}[v${hasAudio ? "out" : ""}]${hasAudio ? "[aout]" : ""}`);
+  const videoConcatLabel = "vcat";
+  filterParts.push(`${concatInputs.join("")}concat=n=${keepRanges.length}:v=1:a=${hasAudio ? 1 : 0}[${videoConcatLabel}]${hasAudio ? "[aout]" : ""}`);
 
-  const args = ["-y", "-hide_banner", "-i", absInput, "-filter_complex", filterParts.join(";"), "-map", hasAudio ? "[vout]" : "[v]", "-c:v", encoder, "-preset", "veryfast"];
+  let videoOut = videoConcatLabel;
+  if (size) {
+    filterParts.push(`[${videoConcatLabel}]scale=${Math.max(2, Math.round(opts.width!))}:${Math.max(2, Math.round(opts.height!))}[vout]`);
+    videoOut = "vout";
+  }
+
+  const args = ["-y", "-hide_banner", "-i", absInput, "-filter_complex", filterParts.join(";"), "-map", `[${videoOut}]`, "-c:v", opts.encoder];
+  if (opts.encoder === "libx264" || opts.encoder === "libx265") args.push("-preset", "veryfast");
+  if (opts.fps && opts.fps > 0) args.push("-r", `${opts.fps}`);
   if (hasAudio) {
-    args.push("-map", "[aout]", "-c:a", "aac");
+    args.push("-map", "[aout]", "-c:a", audioCodec);
   } else {
     args.push("-an");
   }
-  args.push("-movflags", "+faststart", outputPath);
+  if (opts.container === "mp4" || opts.container === "mov") args.push("-movflags", "+faststart");
+  args.push(outputPath);
   return args;
 }
 
@@ -1653,7 +1678,13 @@ function studioApiPlugin(): Plugin {
 
           const root = (body.root ?? studioSettings.roots[0]?.id ?? "") as RootName;
           const relPath = String(body.path ?? "");
-          const outputName = sanitizeOutputName(String(body.outputName ?? ""), relPath);
+          const render = body.render || {};
+          const container = ["mp4", "mov", "webm"].includes(String(render.container || "").toLowerCase()) ? String(render.container).toLowerCase() as "mp4" | "mov" | "webm" : "mp4";
+          const codec = String(render.codec || "h264").toLowerCase();
+          const fps = Number(render.fps || 0);
+          const width = Number(render.width || 0);
+          const height = Number(render.height || 0);
+          const outputName = sanitizeOutputName(String(body.outputName ?? ""), relPath, container);
           const keepRanges = normalizeKeepRanges(body);
           const rootMap = getRootMap();
 
@@ -1693,40 +1724,44 @@ function studioApiPlugin(): Plugin {
           exportJobs.set(id, job);
 
           job.status = "running";
-          const hasQsv = ffmpegHasEncoder("h264_qsv");
           const hasAudio = inputHasAudio(absMedia);
-          pushLog(job, `Exporting ${relPath} -> ${outputPath}\n`);
+          pushLog(job, `Rendering ${relPath} -> ${outputPath}\n`);
           pushLog(job, `Detected audio stream: ${hasAudio ? "yes" : "no"}\n`);
 
-          const preferred = hasQsv ? "h264_qsv" : "libx264";
-          job.encoder = preferred;
-          pushLog(job, `Encoder preference: ${preferred}\n`);
+          const encoderCandidates: string[] = codec === "h264"
+            ? [ffmpegHasEncoder("h264_qsv") ? "h264_qsv" : "", "libx264"]
+            : codec === "h265"
+              ? [ffmpegHasEncoder("hevc_qsv") ? "hevc_qsv" : "", "libx265"]
+              : codec === "vp8"
+                ? ["libvpx"]
+                : codec === "vp9"
+                  ? ["libvpx-vp9"]
+                  : ["prores_ks"];
 
-          const preferredCode = await runFfmpeg(job, ffmpegArgsForRanges(absMedia, outputPath, keepRanges, preferred, hasAudio));
+          let finalCode: number | null = 1;
+          for (const enc of encoderCandidates.filter(Boolean)) {
+            job.encoder = enc;
+            pushLog(job, `Encoder attempt: ${enc}\n`);
+            const code = await runFfmpeg(job, ffmpegArgsForRanges(absMedia, outputPath, keepRanges, {
+              encoder: enc,
+              container,
+              fps: fps > 0 ? fps : undefined,
+              width: width > 0 ? width : undefined,
+              height: height > 0 ? height : undefined,
+            }, hasAudio));
+            finalCode = code;
+            if (code === 0) break;
+            pushLog(job, `${enc} failed (${code})\n`);
+          }
 
-          if (preferredCode !== 0 && preferred === "h264_qsv") {
-            pushLog(job, `h264_qsv failed (${preferredCode}), retrying with libx264\n`);
-            job.encoder = "libx264";
-            const fallbackCode = await runFfmpeg(job, ffmpegArgsForRanges(absMedia, outputPath, keepRanges, "libx264", hasAudio));
-            job.exitCode = fallbackCode;
-            job.endedAt = Date.now();
-            if (fallbackCode === 0) {
-              job.status = "done";
-              pushLog(job, `Done: ${outputPath}\n`);
-            } else {
-              job.status = "error";
-              job.error = `ffmpeg failed (${fallbackCode})`;
-            }
+          job.exitCode = finalCode;
+          job.endedAt = Date.now();
+          if (finalCode === 0) {
+            job.status = "done";
+            pushLog(job, `Done: ${outputPath}\n`);
           } else {
-            job.exitCode = preferredCode;
-            job.endedAt = Date.now();
-            if (preferredCode === 0) {
-              job.status = "done";
-              pushLog(job, `Done: ${outputPath}\n`);
-            } else {
-              job.status = "error";
-              job.error = `ffmpeg failed (${preferredCode})`;
-            }
+            job.status = "error";
+            job.error = `ffmpeg failed (${finalCode})`;
           }
 
           res.setHeader("Content-Type", "application/json");

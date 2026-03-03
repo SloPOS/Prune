@@ -491,19 +491,19 @@ select {
   .mobileLayout .splitHandle { display: none; }
 
   .mobileLayout.mobile-media .transcriptPane,
-  .mobileLayout.mobile-export .transcriptPane,
+  .mobileLayout.mobile-render .transcriptPane,
   .mobileLayout.mobile-tools .transcriptPane {
     display: none;
   }
 
   .mobileLayout.mobile-transcript .videoPane,
   .mobileLayout.mobile-tools .videoPane,
-  .mobileLayout.mobile-export .videoPane {
+  .mobileLayout.mobile-render .videoPane {
     display: none;
   }
 
   .mobileLayout.mobile-tools .transcriptPane,
-  .mobileLayout.mobile-export .videoPane {
+  .mobileLayout.mobile-render .videoPane {
     display: flex;
   }
 
@@ -515,8 +515,8 @@ select {
   .mobileLayout.mobile-transcript .mobileToolsSection,
   .mobileLayout.mobile-transcript .mobileExportSection,
   .mobileLayout.mobile-tools .mobileTranscriptSection,
-  .mobileLayout.mobile-export .mobileMediaSection,
-  .mobileLayout.mobile-export .mobileToolsSection {
+  .mobileLayout.mobile-render .mobileMediaSection,
+  .mobileLayout.mobile-render .mobileToolsSection {
     display: none;
   }
 

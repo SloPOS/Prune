@@ -3,6 +3,7 @@ import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type Wo
 import pruneLogo from "./assets/prune-logo.jpg";
 import { fetchJsonSafe, formatBytes, formatDurationShort, formatEta, normalizeRunningStatus, startPolling } from "./utils/appRuntime";
 import { buildScriptBody, isAudioFile, isVideoFile, mergeTimeRanges, normalizeTokens as normalizeTranscript, sanitizeBaseName, tokenAtTime } from "./utils/appMedia";
+import { useScopedMobileModalTab } from "./hooks/useScopedMobileModalTab";
 
 type RootName = string;
 type BrowserEntry = {
@@ -1405,45 +1406,11 @@ export function App() {
     }
   }
 
-  useEffect(() => {
-    if (showFilePickerModal) {
-      setFilePickerModalTab((prev) => prev ?? mobileTab);
-    } else {
-      setFilePickerModalTab(null);
-    }
-  }, [showFilePickerModal, mobileTab]);
-
-  useEffect(() => {
-    if (showTranscriptPrompt) {
-      setTranscriptPromptTab((prev) => prev ?? mobileTab);
-    } else {
-      setTranscriptPromptTab(null);
-    }
-  }, [showTranscriptPrompt, mobileTab]);
-
-  useEffect(() => {
-    if (showTranscribeModal) {
-      setTranscribeModalTab((prev) => prev ?? mobileTab);
-    } else {
-      setTranscribeModalTab(null);
-    }
-  }, [showTranscribeModal, mobileTab]);
-
-  useEffect(() => {
-    if (showExportModal) {
-      setExportModalTab((prev) => prev ?? mobileTab);
-    } else {
-      setExportModalTab(null);
-    }
-  }, [showExportModal, mobileTab]);
-
-  useEffect(() => {
-    if (showRenderPanel) {
-      setRenderPanelTab((prev) => prev ?? mobileTab);
-    } else {
-      setRenderPanelTab(null);
-    }
-  }, [showRenderPanel, mobileTab]);
+  useScopedMobileModalTab(showFilePickerModal, mobileTab, setFilePickerModalTab);
+  useScopedMobileModalTab(showTranscriptPrompt, mobileTab, setTranscriptPromptTab);
+  useScopedMobileModalTab(showTranscribeModal, mobileTab, setTranscribeModalTab);
+  useScopedMobileModalTab(showExportModal, mobileTab, setExportModalTab);
+  useScopedMobileModalTab(showRenderPanel, mobileTab, setRenderPanelTab);
 
   const isFullscreenActive = () => {
     const docAny = document as Document & { webkitFullscreenElement?: Element | null };

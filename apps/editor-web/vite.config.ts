@@ -260,6 +260,14 @@ function pushLog(job: { log: string[] }, line: string) {
   if (job.log.length > 250) job.log.shift();
 }
 
+function lastLogLine(job: { log: string[] }): string {
+  for (let i = job.log.length - 1; i >= 0; i -= 1) {
+    const s = String(job.log[i] || "").trim();
+    if (s) return s.slice(0, 240);
+  }
+  return "";
+}
+
 function probeDurationSec(absInput: string): number | undefined {
   try {
     const probe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", absInput], {
@@ -1644,12 +1652,21 @@ function studioApiPlugin(): Plugin {
             pushLog(job, text);
           });
 
-          ff.on("close", (ffCode) => {
+          ff.on("error", (err) => {
+            pushLog(job, `ffmpeg spawn error: ${String(err?.message || err)}`);
+            job.status = "error";
+            job.phase = "error";
+            job.error = `Audio extraction failed (spawn error): ${String(err?.message || err)}`;
+            job.endedAt = Date.now();
+          });
+
+          ff.on("close", (ffCode, ffSignal) => {
             if (ffCode !== 0) {
               job.status = "error";
               job.phase = "error";
-              job.exitCode = ffCode;
-              job.error = `Audio extraction failed (${ffCode})`;
+              job.exitCode = ffCode ?? undefined;
+              const detail = lastLogLine(job);
+              job.error = `Audio extraction failed (${ffCode ?? "null"}${ffSignal ? `, signal ${ffSignal}` : ""})${detail ? ` — ${detail}` : ""}`;
               job.endedAt = Date.now();
               return;
             }
@@ -1681,8 +1698,16 @@ function studioApiPlugin(): Plugin {
               }
               pushLog(job, text);
             });
-            tr.on("close", (trCode) => {
-              job.exitCode = trCode;
+            tr.on("error", (err) => {
+              pushLog(job, `whisper spawn error: ${String(err?.message || err)}`);
+              job.status = "error";
+              job.phase = "error";
+              job.error = `Whisper failed (spawn error): ${String(err?.message || err)}`;
+              job.endedAt = Date.now();
+            });
+
+            tr.on("close", (trCode, trSignal) => {
+              job.exitCode = trCode ?? undefined;
               job.endedAt = Date.now();
               if (trCode === 0) {
                 job.status = "done";
@@ -1692,7 +1717,8 @@ function studioApiPlugin(): Plugin {
               } else {
                 job.status = "error";
                 job.phase = "error";
-                job.error = `Whisper failed (${trCode})`;
+                const detail = lastLogLine(job);
+                job.error = `Whisper failed (${trCode ?? "null"}${trSignal ? `, signal ${trSignal}` : ""})${detail ? ` — ${detail}` : ""}`;
               }
             });
           });

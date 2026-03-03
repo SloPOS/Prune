@@ -265,10 +265,18 @@ async function fetchJsonSafe(url: string) {
 
 function startPolling(task: () => Promise<void>, intervalMs: number) {
   let cancelled = false;
+  let inFlight = false;
+
   const run = async () => {
-    if (cancelled) return;
-    await task();
+    if (cancelled || inFlight) return;
+    inFlight = true;
+    try {
+      await task();
+    } finally {
+      inFlight = false;
+    }
   };
+
   void run();
   const timer = window.setInterval(() => { void run(); }, intervalMs);
   return () => {

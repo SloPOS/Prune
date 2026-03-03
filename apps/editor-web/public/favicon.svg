@@ -1,14 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Prune favicon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Prune scissors favicon">
   <rect x="2" y="2" width="60" height="60" rx="12" fill="#1e5c3b"/>
 
+  <!-- scissors -->
   <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M14 46 L34 34" stroke-width="6"/>
-    <path d="M14 18 L34 30" stroke-width="6"/>
-    <path d="M34 30 L50 22" stroke-width="5"/>
-    <path d="M34 34 L50 42" stroke-width="5"/>
-    <circle cx="24" cy="24" r="5" stroke-width="4"/>
-    <circle cx="24" cy="40" r="5" stroke-width="4"/>
+    <!-- blades -->
+    <path d="M28 34 L50 20" stroke-width="5"/>
+    <path d="M28 30 L50 44" stroke-width="5"/>
+
+    <!-- handle arms -->
+    <path d="M28 32 L16 24" stroke-width="6"/>
+    <path d="M28 32 L16 40" stroke-width="6"/>
+
+    <!-- handles -->
+    <circle cx="14" cy="22" r="5.5" stroke-width="4"/>
+    <circle cx="14" cy="42" r="5.5" stroke-width="4"/>
   </g>
 
-  <circle cx="34" cy="32" r="2.5" fill="#ffffff"/>
+  <!-- pivot -->
+  <circle cx="28" cy="32" r="2.6" fill="#ffffff"/>
 </svg>

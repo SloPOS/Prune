@@ -517,7 +517,11 @@ select {
   .mobileLayout.mobile-tools .mobileTranscriptSection,
   .mobileLayout.mobile-render .mobileMediaSection,
   .mobileLayout.mobile-render .mobileToolsSection {
-    display: none;
+    display: none !important;
+  }
+
+  .mobileLayout.mobile-render .mobileExportSection {
+    display: flex !important;
   }
 
   .videoPane,

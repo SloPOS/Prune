@@ -291,6 +291,7 @@ export function App() {
   const [renderCodec, setRenderCodec] = useState<"h264" | "h265" | "vp8" | "vp9" | "prores">("h264");
   const [renderResolution, setRenderResolution] = useState("source");
   const [renderFps, setRenderFps] = useState("source");
+  const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
   const [showFilePickerModal, setShowFilePickerModal] = useState(false);
   const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");
   const [filePickerShowAll, setFilePickerShowAll] = useState(false);
@@ -434,6 +435,12 @@ export function App() {
     }, 1200);
     return () => window.clearInterval(timer);
   }, [exportState.jobId, exportState.status, downloadedExportJobs]);
+
+  useEffect(() => {
+    if (!showRenderPanel || !selectedMedia) return;
+    const query = new URLSearchParams({ root: selectedMedia.root, path: selectedMedia.path }).toString();
+    void fetch(`/api/media/probe?${query}`).then((r) => r.ok ? r.json() : null).then((d) => setRenderSourceInfo(d?.details ?? null)).catch(() => setRenderSourceInfo(null));
+  }, [showRenderPanel, selectedMedia?.root, selectedMedia?.path]);
 
   useEffect(() => {
     if (transcribe.status !== "done" || !transcribe.jobId || !transcribe.transcriptRelPath) return;
@@ -1404,7 +1411,7 @@ export function App() {
           <button className={mobileTab === "media" ? "active" : ""} onClick={() => setMobileTab("media")}>Media</button>
           <button className={mobileTab === "transcript" ? "active" : ""} onClick={() => setMobileTab("transcript")} disabled={tokens.length === 0}>Transcript</button>
           <button className={mobileTab === "tools" ? "active" : ""} onClick={() => setMobileTab("tools")}>Tools</button>
-          <button className={mobileTab === "export" ? "active" : ""} onClick={() => setMobileTab("export")}>Render</button>
+          <button className={mobileTab === "render" ? "active" : ""} onClick={() => setMobileTab("render")}>Render</button>
           <div className="appMenuWrap">
             <button className="appMenuBtn" title="Project and settings menu" onClick={() => setShowAppMenu((v) => !v)}>☰</button>
             {showAppMenu && (
@@ -1521,7 +1528,7 @@ export function App() {
                 <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220, flex: 1 }} title="Base file name for exports" />
               </div>
               <div className="row">
-                <button title="Render cut media file" onClick={() => setShowRenderPanel(true)} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+                <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
                 <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
                 <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
                 <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>
@@ -1767,10 +1774,25 @@ export function App() {
 
     {showRenderPanel && (
       <div className="settingsOverlay" onClick={() => setShowRenderPanel(false)}>
-        <div className="settingsModal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+        <div className="settingsModal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>Render settings</h3>
             <button title="Close" onClick={() => setShowRenderPanel(false)}>✕</button>
+          </div>
+          <div className="row" style={{ alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              {videoSrc && (activeMediaKind === "video" ? <div className="videoFrame16x9" style={{ marginBottom: 8 }}><video controls src={videoSrc} /></div> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
+              <div className="hint">Source preview</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div className="hint" style={{ marginBottom: 6 }}><strong>Source media details</strong></div>
+              <div className="row" style={{ marginBottom: 4 }}><span className="hint">Container:</span><strong>{renderSourceInfo?.container || "—"}</strong></div>
+              <div className="row" style={{ marginBottom: 4 }}><span className="hint">Video codec:</span><strong>{renderSourceInfo?.videoCodec || "—"}</strong></div>
+              <div className="row" style={{ marginBottom: 4 }}><span className="hint">Resolution:</span><strong>{renderSourceInfo?.width && renderSourceInfo?.height ? `${renderSourceInfo.width}×${renderSourceInfo.height}` : "—"}</strong></div>
+              <div className="row" style={{ marginBottom: 4 }}><span className="hint">Framerate:</span><strong>{renderSourceInfo?.fps ? `${Number(renderSourceInfo.fps).toFixed(3)} fps` : "—"}</strong></div>
+              <div className="row" style={{ marginBottom: 4 }}><span className="hint">Audio:</span><strong>{renderSourceInfo?.audioCodec || "none"}{renderSourceInfo?.audioChannels ? ` · ${renderSourceInfo.audioChannels}ch` : ""}{renderSourceInfo?.audioSampleRate ? ` · ${renderSourceInfo.audioSampleRate}Hz` : ""}</strong></div>
+              <div className="row" style={{ marginBottom: 0 }}><span className="hint">Duration:</span><strong>{renderSourceInfo?.durationSec ? `${Number(renderSourceInfo.durationSec).toFixed(2)}s` : "—"}</strong></div>
+            </div>
           </div>
           <div className="row">
             <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
@@ -1789,7 +1811,7 @@ export function App() {
       </div>
     )}
 
-    {showExportModal && (
+    {showExportModal && !showRenderPanel && (
       <div className="settingsOverlay" onClick={() => setShowExportModal(false)}>
         <div className="settingsModal" onClick={(e) => e.stopPropagation()}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1800,7 +1822,7 @@ export function App() {
           {videoSrc && (activeMediaKind === "video" ? <video controls src={videoSrc} /> : <audio controls src={videoSrc} style={{ width: "100%", marginBottom: 10 }} />)}
           <div className="row">
             <input value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Output file name" style={{ minWidth: 220 }} title="Base file name for exports" />
-            <button title="Render cut media file" onClick={() => setShowRenderPanel(true)} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
+            <button title="Render cut media file" onClick={() => { setShowExportModal(false); setShowRenderPanel(true); }} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
             <button title="Export Resolve-compatible FCPXML timeline" onClick={() => void exportResolveFcpxml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Resolve FCPXML</button>
             <button title="Export CMX3600 EDL timeline" onClick={() => void exportEdl()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export EDL (CMX3600)</button>
             <button title="Export Premiere-friendly XML timeline" onClick={() => void exportPremiereTimelineXml()} disabled={!selectedMedia || keeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Export Premiere XML</button>

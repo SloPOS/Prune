@@ -598,6 +598,37 @@ function probeFcpxmlMetadata(absInput: string): { fps: number; timecode: string;
   }
 }
 
+function probeMediaDetails(absInput: string) {
+  try {
+    const probe = spawnSync("ffprobe", [
+      "-v", "error",
+      "-print_format", "json",
+      "-show_entries",
+      "format=duration,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,sample_rate,channels,bit_rate",
+      absInput,
+    ], { encoding: "utf-8" });
+    const payload = JSON.parse(probe.stdout || "{}");
+    const streams = Array.isArray(payload.streams) ? payload.streams : [];
+    const v = streams.find((s: any) => s.codec_type === "video") || {};
+    const a = streams.find((s: any) => s.codec_type === "audio") || {};
+    return {
+      container: String(payload?.format?.format_name || "unknown"),
+      durationSec: Number(payload?.format?.duration || 0) || 0,
+      bitRate: Number(payload?.format?.bit_rate || 0) || 0,
+      videoCodec: String(v.codec_name || "unknown"),
+      width: Number(v.width || 0) || 0,
+      height: Number(v.height || 0) || 0,
+      fps: pickRate(v.avg_frame_rate) || pickRate(v.r_frame_rate) || 0,
+      audioCodec: String(a.codec_name || "none"),
+      audioSampleRate: Number(a.sample_rate || 0) || 0,
+      audioChannels: Number(a.channels || 0) || 0,
+      audioBitRate: Number(a.bit_rate || 0) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeFcpxmlName(raw: string, sourceRelPath: string): string {
   const fallbackBase = path.basename(sourceRelPath, path.extname(sourceRelPath)) || "edited";
   const base = (raw || fallbackBase).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1437,6 +1468,32 @@ function studioApiPlugin(): Plugin {
         } catch (error) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to run analysis" }));
+        }
+      });
+
+      server.middlewares.use("/api/media/probe", async (req, res) => {
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const root = String(url.searchParams.get("root") || "");
+          const relPath = String(url.searchParams.get("path") || "");
+          const rootMap = getRootMap();
+          if (!(root in rootMap)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "Invalid root" }));
+            return;
+          }
+          const absPath = safeResolve(root, relPath);
+          if (!absPath || !fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "File not found" }));
+            return;
+          }
+          const details = probeMediaDetails(absPath);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ details }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: "Failed to probe media" }));
         }
       });
 

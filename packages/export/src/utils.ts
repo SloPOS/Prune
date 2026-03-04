@@ -145,14 +145,7 @@ export function rateFramesToFractionSeconds(frames: number, rate: FrameRate): st
   return `${num}/${den}s`;
 }
 
-export interface FrameKeepRange {
-  inFrames: number;
-  outFrames: number;
-  startFrames: number;
-  endFrames: number;
-}
-
-export interface RateFrameKeepRange {
+export interface KeepRangeFrames {
   inFrames: number;
   outFrames: number;
   startFrames: number;
@@ -162,7 +155,7 @@ export interface RateFrameKeepRange {
 function mapKeepRangesToFrameRanges(
   keepRanges: KeepRange[],
   frameMapper: (seconds: number) => number,
-): FrameKeepRange[] {
+): KeepRangeFrames[] {
   return keepRanges.map((range) => {
     const inFrames = frameMapper(range.sourceStartSec);
     const outFrames = frameMapper(range.sourceEndSec);
@@ -176,7 +169,7 @@ export function keepRangesToFrameRanges(
   keepRanges: KeepRange[],
   fps: number,
   options: { alreadyNormalized?: boolean } = {},
-): FrameKeepRange[] {
+): KeepRangeFrames[] {
   const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
   const fpsInt = fpsToInt(fps);
   return mapKeepRangesToFrameRanges(ranges, (seconds) => secondsToFramesWithFpsInt(seconds, fpsInt));
@@ -186,7 +179,15 @@ export function keepRangesToRateFrameRanges(
   keepRanges: KeepRange[],
   rate: FrameRate,
   options: { alreadyNormalized?: boolean } = {},
-): RateFrameKeepRange[] {
+): KeepRangeFrames[] {
   const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
   return mapKeepRangesToFrameRanges(ranges, (seconds) => secondsToRateFrames(seconds, rate));
+}
+
+export function maxEndFrames(ranges: Array<{ endFrames: number }>): number {
+  let max = 0;
+  for (const range of ranges) {
+    if (range.endFrames > max) max = range.endFrames;
+  }
+  return max;
 }

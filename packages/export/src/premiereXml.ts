@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { fpsToInt, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, secondsToFrames, xmlEscape } from "./utils.js";
+import { fpsToInt, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, maxEndFrames, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, secondsToFrames, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -63,9 +63,7 @@ export function exportPremiereXml(
     })
     .join("\n");
 
-  const sequenceDurationFrames = clipFrameRanges.length > 0
-    ? Math.max(...clipFrameRanges.map((clip) => clip.endFrames))
-    : 0;
+  const sequenceDurationFrames = maxEndFrames(clipFrameRanges);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <xmeml version="5">

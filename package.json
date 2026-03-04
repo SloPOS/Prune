@@ -22,6 +22,7 @@
     "transcribe:extract": "bash scripts/extract-audio-wav.sh",
     "transcribe:whisper": "python3 scripts/transcribe_whisper.py",
     "transcribe:media": "bash scripts/run-whisper-transcription.sh",
-    "media-api": "node apps/media-api/server.js"
+    "media-api": "node apps/media-api/server.js",
+    "start:prod": "node apps/media-api/prod-server.mjs"
   }
 }

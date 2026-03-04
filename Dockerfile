@@ -18,6 +18,8 @@ COPY . .
 
 RUN python3 -m pip install --break-system-packages -r scripts/requirements.txt
 
+RUN npm run build
+
 ENV HOST=0.0.0.0 \
     PORT=4173 \
     PRUNE_INBOX_ROOT=/data/media \
@@ -30,4 +32,4 @@ ENV HOST=0.0.0.0 \
 
 EXPOSE 4173
 
-CMD ["npm", "run", "dev", "--workspace", "@prune/editor-web", "--", "--host", "0.0.0.0", "--port", "4173"]
+CMD ["npm", "run", "start:prod"]

@@ -16,59 +16,103 @@ const FIXED_SMART_CLEANUP_PHRASES = [
   "go ahead", "gone ahead", "let's go ahead", "we're gonna", "we're going to",
 ] as const;
 
+type NormalizedToken = { id: string; normalized: string };
+type TokenCorpus = {
+  normalizedTokens: NormalizedToken[];
+  ngramIndex: Map<string, string[]>;
+  maxWords: number;
+};
+
+const corpusCache = new WeakMap<WordToken[], TokenCorpus>();
+
 function normalizeText(input: string): string {
   return input.toLowerCase().replace(/[’]/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
 }
 
-function normalizeWordTokens(tokens: WordToken[]): Array<{ id: string; normalized: string }> {
+function normalizeWordTokens(tokens: WordToken[]): NormalizedToken[] {
   return tokens
     .map((token) => ({ id: token.id, normalized: normalizeText(token.text) }))
     .filter((token) => token.normalized.length > 0);
 }
 
-function findMatchingTokenIds(
-  normalizedTokens: Array<{ id: string; normalized: string }>,
-  phraseParts: string[],
-): string[] {
-  if (phraseParts.length === 0 || normalizedTokens.length < phraseParts.length) return [];
+function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: number): Map<string, string[]> {
+  const index = new Map<string, string[]>();
 
-  const ids: string[] = [];
-  for (let i = 0; i <= normalizedTokens.length - phraseParts.length; i += 1) {
-    let isMatch = true;
-    for (let j = 0; j < phraseParts.length; j += 1) {
-      if (normalizedTokens[i + j]!.normalized !== phraseParts[j]) {
-        isMatch = false;
-        break;
+  for (let start = 0; start < normalizedTokens.length; start += 1) {
+    const phraseParts: string[] = [];
+    for (let size = 1; size <= maxPhraseLength && start + size <= normalizedTokens.length; size += 1) {
+      const token = normalizedTokens[start + size - 1];
+      if (!token) break;
+
+      phraseParts.push(token.normalized);
+      const key = phraseParts.join(" ");
+      const ids = index.get(key);
+
+      if (ids) {
+        for (let offset = 0; offset < size; offset += 1) ids.push(normalizedTokens[start + offset]!.id);
+      } else {
+        const nextIds: string[] = [];
+        for (let offset = 0; offset < size; offset += 1) nextIds.push(normalizedTokens[start + offset]!.id);
+        index.set(key, nextIds);
       }
     }
-    if (isMatch) {
-      for (let j = 0; j < phraseParts.length; j += 1) ids.push(normalizedTokens[i + j]!.id);
-    }
   }
-  return ids;
+
+  return index;
+}
+
+function maxPhraseLength(phrases: readonly string[]): number {
+  let max = 1;
+  for (const phrase of phrases) {
+    const size = normalizeText(phrase).split(" ").filter(Boolean).length;
+    if (size > max) max = size;
+  }
+  return max;
+}
+
+const FIXED_PHRASE_MAX_WORDS = maxPhraseLength(FIXED_SMART_CLEANUP_PHRASES);
+
+function getCorpus(tokens: WordToken[], maxWords = FIXED_PHRASE_MAX_WORDS): TokenCorpus {
+  const cached = corpusCache.get(tokens);
+  if (cached && cached.maxWords >= maxWords) return cached;
+
+  const normalizedTokens = cached?.normalizedTokens ?? normalizeWordTokens(tokens);
+  const ngramIndex = buildNgramIndex(normalizedTokens, maxWords);
+  const corpus = { normalizedTokens, ngramIndex, maxWords };
+  corpusCache.set(tokens, corpus);
+  return corpus;
+}
+
+function findMatchingTokenIds(index: Map<string, string[]>, normalizedPhrase: string): string[] {
+  if (!normalizedPhrase) return [];
+  return index.get(normalizedPhrase) ?? [];
 }
 
 export function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
-  const normalizedTokens = normalizeWordTokens(tokens);
+  const { normalizedTokens, ngramIndex } = getCorpus(tokens, FIXED_PHRASE_MAX_WORDS);
   if (normalizedTokens.length === 0) return [];
 
-  const fixedPhrases = FIXED_SMART_CLEANUP_PHRASES.map((phrase) => {
-    const normalizedPhrase = normalizeText(phrase);
-    return { phrase, normalizedPhrase, phraseParts: normalizedPhrase.split(" ").filter(Boolean) };
-  }).filter((entry) => entry.normalizedPhrase.length > 0 && entry.phraseParts.length > 0);
-
   const results: PhraseMatch[] = [];
-  for (const entry of fixedPhrases) {
-    const tokenIds = findMatchingTokenIds(normalizedTokens, entry.phraseParts);
-    const count = tokenIds.length / entry.phraseParts.length;
-    if (count > 0) results.push({ phrase: entry.phrase, normalizedPhrase: entry.normalizedPhrase, tokenIds, count });
+  for (const phrase of FIXED_SMART_CLEANUP_PHRASES) {
+    const normalizedPhrase = normalizeText(phrase);
+    if (!normalizedPhrase) continue;
+
+    const tokenIds = findMatchingTokenIds(ngramIndex, normalizedPhrase);
+    if (tokenIds.length === 0) continue;
+
+    const phraseWordCount = normalizedPhrase.split(" ").filter(Boolean).length;
+    const count = tokenIds.length / phraseWordCount;
+    if (count > 0) results.push({ phrase, normalizedPhrase, tokenIds, count });
   }
 
   return results.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
 }
 
 export function findPhraseTokenIds(tokens: WordToken[], phrase: string): string[] {
-  const parts = normalizeText(phrase).split(" ").filter(Boolean);
-  const normalizedTokens = normalizeWordTokens(tokens);
-  return findMatchingTokenIds(normalizedTokens, parts);
+  const normalizedPhrase = normalizeText(phrase).split(" ").filter(Boolean).join(" ");
+  if (!normalizedPhrase) return [];
+
+  const phraseWordCount = normalizedPhrase.split(" ").length;
+  const { ngramIndex } = getCorpus(tokens, Math.max(FIXED_PHRASE_MAX_WORDS, phraseWordCount));
+  return findMatchingTokenIds(ngramIndex, normalizedPhrase);
 }

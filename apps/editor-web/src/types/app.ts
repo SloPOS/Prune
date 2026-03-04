@@ -14,6 +14,12 @@ export type UiTab = "media" | "transcript" | "tools" | "render";
 export type OptionalUiTab = UiTab | null;
 export type RenderSection = "video" | "editor" | "subs" | "script";
 export type DesktopRenderSection = "video" | "project" | "subs";
+export const RENDER_CONTAINERS = ["mp4", "mov", "webm"] as const;
+export type RenderContainer = (typeof RENDER_CONTAINERS)[number];
+export const RENDER_CODECS = ["h264", "h265", "vp8", "vp9", "prores"] as const;
+export type RenderCodec = (typeof RENDER_CODECS)[number];
+export const GALLERY_SCOPES = ["originals", "exports", "both"] as const;
+export type GalleryScope = (typeof GALLERY_SCOPES)[number];
 export type ModalDragKey =
   | "export"
   | "render"

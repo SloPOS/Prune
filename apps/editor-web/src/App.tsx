@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type WordToken } from "@prune/core";
+import { cutRangesFromDeletedTokens, keepRangesFromCuts, type KeepRange, type TimeRange, type WordToken } from "@prune/core";
 import pruneLogo from "./assets/prune-logo.jpg";
 import { formatBytes, formatDurationShort, formatEta } from "./utils/appRuntime";
 import { buildScriptBody, isAudioFile, isVideoFile, mergeTimeRanges, normalizeTokens as normalizeTranscript, sanitizeBaseName, tokenAtTime } from "./utils/appMedia";
@@ -13,15 +13,21 @@ import {
   APP_VERSION,
   EXPORT_JOB_STORAGE_KEY,
   FUN_MODE_STORAGE_KEY,
+  GALLERY_SCOPES,
+  RENDER_CODECS,
+  RENDER_CONTAINERS,
   type AnalysisCandidate,
   type BrowserEntry,
   type DesktopRenderSection,
   type ExportState,
   type GalleryItem,
+  type GalleryScope,
   type GapSuggestion,
   type GlobalRenderStatus,
   type ModalDragKey,
   type OptionalUiTab,
+  type RenderCodec,
+  type RenderContainer,
   type RenderSection,
   type RootConfig,
   type RootName,
@@ -33,6 +39,25 @@ import {
   type TreeSelection,
   type UiTab,
 } from "./types/app";
+
+function parseEnumValue<T extends string>(value: string, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function toKeepRanges(ranges: Array<{ startSec: number; endSec: number }>): KeepRange[] {
+  let outputStartSec = 0;
+  return ranges
+    .filter((range) => range.endSec > range.startSec)
+    .map((range) => {
+      const keepRange: KeepRange = {
+        sourceStartSec: range.startSec,
+        sourceEndSec: range.endSec,
+        outputStartSec,
+      };
+      outputStartSec += range.endSec - range.startSec;
+      return keepRange;
+    });
+}
 
 async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {
   const query = new URLSearchParams({ root, dir: relDir }).toString();
@@ -100,8 +125,8 @@ export function App() {
   const [scriptIncludeDeleted, setScriptIncludeDeleted] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showRenderPanel, setShowRenderPanel] = useState(false);
-  const [renderContainer, setRenderContainer] = useState<"mp4" | "mov" | "webm">("mp4");
-  const [renderCodec, setRenderCodec] = useState<"h264" | "h265" | "vp8" | "vp9" | "prores">("h264");
+  const [renderContainer, setRenderContainer] = useState<RenderContainer>("mp4");
+  const [renderCodec, setRenderCodec] = useState<RenderCodec>("h264");
   const [renderResolution, setRenderResolution] = useState("source");
   const [renderFps, setRenderFps] = useState("source");
   const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
@@ -139,7 +164,7 @@ export function App() {
   const [showSttPresetMenuInline, setShowSttPresetMenuInline] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
   const [showGalleryModal, setShowGalleryModal] = useState(false);
-  const [galleryScope, setGalleryScope] = useState<"originals" | "exports" | "both">("both");
+  const [galleryScope, setGalleryScope] = useState<GalleryScope>("both");
   const [galleryShowAllFiles, setGalleryShowAllFiles] = useState(false);
   const [gallerySearch, setGallerySearch] = useState("");
   const [gallerySort, setGallerySort] = useState("date_desc");
@@ -456,14 +481,14 @@ export function App() {
       .filter((token): token is WordToken => Boolean(token))
       .map((token) => ({ startSec: token.startSec, endSec: token.endSec }));
   }, [funModeLocked, funSequence, tokenById]);
-  const renderKeeps = useMemo(() => {
-    if (funModeLocked && funKeepRanges.length > 0) return funKeepRanges;
+  const renderKeeps = useMemo<KeepRange[]>(() => {
+    if (funModeLocked && funKeepRanges.length > 0) return toKeepRanges(funKeepRanges);
     if (keeps.length > 0) return keeps;
-    if (videoDurationSec > 0) return [{ sourceStartSec: 0, sourceEndSec: videoDurationSec, startSec: 0, endSec: videoDurationSec } as any];
+    if (videoDurationSec > 0) return [{ sourceStartSec: 0, sourceEndSec: videoDurationSec, outputStartSec: 0 }];
     return [];
   }, [funModeLocked, funKeepRanges, keeps, videoDurationSec]);
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
-  const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
+  const totalKeepSec = useMemo(() => renderKeeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [renderKeeps]);
 
   const transcribeProgress = useMemo(() => {
     const duration = transcribe.mediaDurationSec ?? 0;
@@ -1835,8 +1860,8 @@ export function App() {
   const renderFormatControls = () => (
     <>
       <div className="row">
-        <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
-        <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
+        <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(parseEnumValue(e.target.value, RENDER_CONTAINERS, "mp4"))}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
+        <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(parseEnumValue(e.target.value, RENDER_CODECS, "h264"))}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
       </div>
       <div className="row">
         <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
@@ -2298,7 +2323,7 @@ export function App() {
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <label className="settingsField">Source
-              <select className="galleryControl" value={galleryScope} onChange={(e) => setGalleryScope(e.target.value as any)}>
+              <select className="galleryControl" value={galleryScope} onChange={(e) => setGalleryScope(parseEnumValue(e.target.value, GALLERY_SCOPES, "both"))}>
                 <option value="originals">Originals</option>
                 <option value="exports">Exports</option>
                 <option value="both">Both</option>

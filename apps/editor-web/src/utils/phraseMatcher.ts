@@ -23,10 +23,25 @@ type TokenCorpus = {
   maxWords: number;
 };
 
+type PreparedPhrase = {
+  phrase: string;
+  normalizedPhrase: string;
+  wordCount: number;
+};
+
 const corpusCache = new WeakMap<WordToken[], TokenCorpus>();
 
 function normalizeText(input: string): string {
   return input.toLowerCase().replace(/[’]/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
+}
+
+function normalizedWordCount(value: string): number {
+  if (!value) return 0;
+  let words = 1;
+  for (let i = 0; i < value.length; i += 1) {
+    if (value.charCodeAt(i) === 32) words += 1;
+  }
+  return words;
 }
 
 function normalizeWordTokens(tokens: WordToken[]): NormalizedToken[] {
@@ -61,16 +76,18 @@ function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: n
   return index;
 }
 
-function maxPhraseLength(phrases: readonly string[]): number {
-  let max = 1;
+function preparePhrases(phrases: readonly string[]): PreparedPhrase[] {
+  const prepared: PreparedPhrase[] = [];
   for (const phrase of phrases) {
-    const size = normalizeText(phrase).split(" ").filter(Boolean).length;
-    if (size > max) max = size;
+    const normalizedPhrase = normalizeText(phrase).split(" ").filter(Boolean).join(" ");
+    if (!normalizedPhrase) continue;
+    prepared.push({ phrase, normalizedPhrase, wordCount: normalizedWordCount(normalizedPhrase) });
   }
-  return max;
+  return prepared;
 }
 
-const FIXED_PHRASE_MAX_WORDS = maxPhraseLength(FIXED_SMART_CLEANUP_PHRASES);
+const FIXED_PREPARED_PHRASES = preparePhrases(FIXED_SMART_CLEANUP_PHRASES);
+const FIXED_PHRASE_MAX_WORDS = FIXED_PREPARED_PHRASES.reduce((max, phrase) => Math.max(max, phrase.wordCount), 1);
 
 function getCorpus(tokens: WordToken[], maxWords = FIXED_PHRASE_MAX_WORDS): TokenCorpus {
   const cached = corpusCache.get(tokens);
@@ -93,16 +110,19 @@ export function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
   if (normalizedTokens.length === 0) return [];
 
   const results: PhraseMatch[] = [];
-  for (const phrase of FIXED_SMART_CLEANUP_PHRASES) {
-    const normalizedPhrase = normalizeText(phrase);
-    if (!normalizedPhrase) continue;
-
-    const tokenIds = findMatchingTokenIds(ngramIndex, normalizedPhrase);
+  for (const phrase of FIXED_PREPARED_PHRASES) {
+    const tokenIds = findMatchingTokenIds(ngramIndex, phrase.normalizedPhrase);
     if (tokenIds.length === 0) continue;
 
-    const phraseWordCount = normalizedPhrase.split(" ").filter(Boolean).length;
-    const count = tokenIds.length / phraseWordCount;
-    if (count > 0) results.push({ phrase, normalizedPhrase, tokenIds, count });
+    const count = tokenIds.length / phrase.wordCount;
+    if (count > 0) {
+      results.push({
+        phrase: phrase.phrase,
+        normalizedPhrase: phrase.normalizedPhrase,
+        tokenIds,
+        count,
+      });
+    }
   }
 
   return results.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
@@ -112,7 +132,7 @@ export function findPhraseTokenIds(tokens: WordToken[], phrase: string): string[
   const normalizedPhrase = normalizeText(phrase).split(" ").filter(Boolean).join(" ");
   if (!normalizedPhrase) return [];
 
-  const phraseWordCount = normalizedPhrase.split(" ").length;
+  const phraseWordCount = normalizedWordCount(normalizedPhrase);
   const { ngramIndex } = getCorpus(tokens, Math.max(FIXED_PHRASE_MAX_WORDS, phraseWordCount));
   return findMatchingTokenIds(ngramIndex, normalizedPhrase);
 }

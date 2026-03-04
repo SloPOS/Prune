@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { fetchJsonSafe, normalizeRunningStatus, startPolling } from "../utils/appRuntime";
+import { fetchJsonSafe, normalizeRunningStatus, parseOptionalNullableNumber, parseOptionalNumber, startPolling, tailLog } from "../utils/appRuntime";
 
 type TranscribeStateLike = {
   jobId: string | null;
@@ -38,14 +38,14 @@ export function useTranscribePolling(
         ...prev,
         status: normalizeRunningStatus(data.status),
         transcriptRelPath: data.transcriptRelPath ?? null,
-        log: Array.isArray(data.log) ? data.log.slice(-12) : prev.log,
+        log: tailLog(data.log, 12) ?? prev.log,
         error: data.error ?? null,
-        startedAt: typeof data.startedAt === "number" ? data.startedAt : prev.startedAt,
-        mediaDurationSec: typeof data.mediaDurationSec === "number" ? data.mediaDurationSec : prev.mediaDurationSec,
-        transcribedSec: typeof data.transcribedSec === "number" ? data.transcribedSec : prev.transcribedSec,
+        startedAt: parseOptionalNumber(data.startedAt) ?? prev.startedAt,
+        mediaDurationSec: parseOptionalNumber(data.mediaDurationSec) ?? prev.mediaDurationSec,
+        transcribedSec: parseOptionalNumber(data.transcribedSec) ?? prev.transcribedSec,
         phase: data.phase ?? prev.phase,
-        percent: typeof data.percent === "number" ? data.percent : prev.percent,
-        etaSec: typeof data.etaSec === "number" || data.etaSec === null ? data.etaSec : prev.etaSec,
+        percent: parseOptionalNumber(data.percent) ?? prev.percent,
+        etaSec: parseOptionalNullableNumber(data.etaSec) ?? prev.etaSec,
         speedLabel: typeof data.speedLabel === "string" || data.speedLabel === null ? data.speedLabel : prev.speedLabel,
       }));
     }, 1200);
@@ -76,7 +76,7 @@ export function useExportPolling(
           status: normalizeRunningStatus(data.status),
           outputPath: data.outputPath ?? prev.outputPath,
           error: data.error ?? null,
-          log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
+          log: tailLog(data.log, 14) ?? prev.log,
         }));
 
         if (data.status === "done" && data.downloadUrl && !downloadedExportJobs.has(exportState.jobId)) {
@@ -95,7 +95,7 @@ export function useExportPolling(
         status: normalizeRunningStatus(data.status),
         outputPath: data.outputPath ?? prev.outputPath,
         error: data.error ?? prev.error ?? null,
-        log: Array.isArray(data.log) ? data.log.slice(-14) : prev.log,
+        log: tailLog(data.log, 14) ?? prev.log,
       }));
     }, exportState.jobId ? 1200 : 1500);
   }, [showExportProgressModal, exportState.jobId, exportState.status, downloadedExportJobs, autoDownloadWhenReady, setExportState, setDownloadedExportJobs]);

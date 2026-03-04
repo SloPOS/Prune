@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { fetchJsonSafe, startPolling } from "../utils/appRuntime";
+import { fetchJsonSafe, parseOptionalNullableNumber, parseOptionalNumber, startPolling } from "../utils/appRuntime";
 
 type GlobalRenderStatusLike = {
   jobId: string | null;
@@ -28,10 +28,10 @@ export function useRenderStatusPolling(
         status: data.status,
         outputPath: data.outputPath,
         outputName: data.outputName,
-        expectedDurationSec: typeof data.expectedDurationSec === "number" ? data.expectedDurationSec : undefined,
-        progressSec: typeof data.progressSec === "number" ? data.progressSec : undefined,
-        percent: typeof data.percent === "number" || data.percent === null ? data.percent : undefined,
-        etaSec: typeof data.etaSec === "number" || data.etaSec === null ? data.etaSec : undefined,
+        expectedDurationSec: parseOptionalNumber(data.expectedDurationSec),
+        progressSec: parseOptionalNumber(data.progressSec),
+        percent: parseOptionalNullableNumber(data.percent),
+        etaSec: parseOptionalNullableNumber(data.etaSec),
         error: data.error,
         lastLog: data.lastLog,
       });

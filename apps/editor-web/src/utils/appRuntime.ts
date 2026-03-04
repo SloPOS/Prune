@@ -46,6 +46,18 @@ export async function fetchJsonSafe(url: string) {
   }
 }
 
+export function parseOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+export function parseOptionalNullableNumber(value: unknown): number | null | undefined {
+  return typeof value === "number" || value === null ? value : undefined;
+}
+
+export function tailLog(value: unknown, maxLines: number): string[] | undefined {
+  return Array.isArray(value) ? value.slice(-maxLines) : undefined;
+}
+
 export function startPolling(task: () => Promise<void>, intervalMs: number) {
   let cancelled = false;
   let inFlight = false;

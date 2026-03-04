@@ -1957,6 +1957,19 @@ export function App() {
     );
   }
 
+  const renderFormatControls = () => (
+    <>
+      <div className="row">
+        <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
+        <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
+      </div>
+      <div className="row">
+        <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
+        <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
+      </div>
+    </>
+  );
+
   return (
     <>
     <div className={`page split ${isMobileLayout ? `mobileLayout mobile-${mobileTab}` : ""}`} ref={splitRef} style={isMobileLayout ? undefined : { gridTemplateColumns: `${splitLeftPct}% 8px 1fr` }}>
@@ -2132,14 +2145,7 @@ export function App() {
                 <div className="row" style={{ marginBottom: 4 }}><span className="hint">Resolution:</span><strong>{renderSourceInfo?.width && renderSourceInfo?.height ? `${renderSourceInfo.width}×${renderSourceInfo.height}` : "—"}</strong></div>
                 <div className="row" style={{ marginBottom: 4 }}><span className="hint">Framerate:</span><strong>{renderSourceInfo?.fps ? `${Number(renderSourceInfo.fps).toFixed(3)} fps` : "—"}</strong></div>
                 <div className="row" style={{ marginBottom: 4 }}><span className="hint">Audio:</span><strong>{renderSourceInfo?.audioCodec || "none"}{renderSourceInfo?.audioChannels ? ` · ${renderSourceInfo.audioChannels}ch` : ""}{renderSourceInfo?.audioSampleRate ? ` · ${renderSourceInfo.audioSampleRate}Hz` : ""}</strong></div>
-                <div className="row">
-                  <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
-                  <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
-                </div>
-                <div className="row">
-                  <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
-                  <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
-                </div>
+                {renderFormatControls()}
                 <div className="row">
                   <button title="Render cut media file" onClick={() => void startExport()} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
                 </div>
@@ -2649,14 +2655,7 @@ export function App() {
               <div className="row" style={{ marginBottom: 0 }}><span className="hint">Duration:</span><strong>{renderSourceInfo?.durationSec ? `${Number(renderSourceInfo.durationSec).toFixed(2)}s` : "—"}</strong></div>
             </div>
           </div>
-          <div className="row">
-            <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
-            <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
-          </div>
-          <div className="row">
-            <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
-            <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
-          </div>
+          {renderFormatControls()}
           <div className="hint">These mirror common ffmpeg render options. H.264 + MP4 is the safest default.</div>
           <div className="row" style={{ justifyContent: "flex-end" }}>
             <button onClick={() => setShowRenderPanel(false)}>Cancel</button>
@@ -2686,14 +2685,7 @@ export function App() {
             <>
               <details className="collapsedPanel" open={desktopRenderSection === "video"}>
                 <summary onClick={(e) => { e.preventDefault(); setDesktopRenderSection("video"); }}><strong>Video Export</strong></summary>
-                <div className="row" style={{ marginTop: 8 }}>
-                  <label className="settingsField">File type<select value={renderContainer} onChange={(e) => setRenderContainer(e.target.value as any)}><option value="mp4">MP4</option><option value="mov">MOV</option><option value="webm">WebM</option></select></label>
-                  <label className="settingsField">Codec<select value={renderCodec} onChange={(e) => setRenderCodec(e.target.value as any)}><option value="h264">H.264 (default)</option><option value="h265">H.265 / HEVC</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="prores">ProRes</option></select></label>
-                </div>
-                <div className="row">
-                  <label className="settingsField">Resolution<select value={renderResolution} onChange={(e) => setRenderResolution(e.target.value)}><option value="source">Source</option><option value="2160p">2160p (4K)</option><option value="1440p">1440p</option><option value="1080p">1080p</option><option value="720p">720p</option></select></label>
-                  <label className="settingsField">Framerate<select value={renderFps} onChange={(e) => setRenderFps(e.target.value)}><option value="source">Source</option><option value="60">60 fps</option><option value="30">30 fps</option><option value="24">24 fps</option></select></label>
-                </div>
+                <div style={{ marginTop: 8 }}>{renderFormatControls()}</div>
                 <div className="row" style={{ marginBottom: 0 }}>
                   <button title="Render cut media file" onClick={() => { setShowExportModal(false); void startExport(); }} disabled={!selectedMedia || renderKeeps.length === 0 || exportState.status === "running" || exportState.status === "starting"}>Render Video/Audio</button>
                 </div>

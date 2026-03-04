@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, parseTimecodeToFrames, pathToFileUrl, validKeepRanges, xmlEscape } from "./utils.js";
+import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -54,7 +54,7 @@ export function exportFcpxmlV1(
   const projectName = options.projectName ?? "Bit Cut Timeline";
   const sequenceName = options.sequenceName ?? projectName;
 
-  const filtered = validKeepRanges(keepRanges);
+  const filtered = normalizeKeepRanges(keepRanges);
   const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
   const durationSec = source.durationSec ?? inferredDurationSec;
 

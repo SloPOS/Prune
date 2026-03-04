@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, validKeepRanges } from "./utils.js";
+import { mediaNameFromSource, normalizeKeepRanges } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -37,7 +37,7 @@ export function exportEdlCmx3600(
   lines.push("FCM: NON-DROP FRAME");
   lines.push("");
 
-  validKeepRanges(keepRanges).forEach((r, i) => {
+  normalizeKeepRanges(keepRanges).forEach((r, i) => {
     const recIn = r.outputStartSec;
     const recOut = r.outputStartSec + (r.sourceEndSec - r.sourceStartSec);
     const event = String(i + 1).padStart(3, "0");

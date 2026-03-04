@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, parseTimecodeToFrames, pathToFileUrl, validKeepRanges, xmlEscape } from "./utils.js";
+import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -23,19 +23,23 @@ export function exportPremiereXml(
   const sequenceName = options.sequenceName ?? options.projectName ?? "Bit Cut Timeline";
   const projectName = options.projectName ?? sequenceName;
 
-  const filtered = validKeepRanges(keepRanges);
+  const filtered = normalizeKeepRanges(keepRanges);
   const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
   const durationSec = source.durationSec ?? inferredDurationSec;
 
   const sourceDurationFrames = toFrames(durationSec, fps);
   const sourceTcFrames = parseTimecodeToFrames(source.timecode, fps);
 
-  const clipItems = filtered
-    .map((range, i) => {
-      const inFrames = toFrames(range.sourceStartSec, fps);
-      const outFrames = toFrames(range.sourceEndSec, fps);
-      const startFrames = toFrames(range.outputStartSec, fps);
-      const endFrames = startFrames + Math.max(0, outFrames - inFrames);
+  const clipFrameRanges = filtered.map((range) => {
+    const inFrames = toFrames(range.sourceStartSec, fps);
+    const outFrames = toFrames(range.sourceEndSec, fps);
+    const startFrames = toFrames(range.outputStartSec, fps);
+    const endFrames = startFrames + Math.max(0, outFrames - inFrames);
+    return { inFrames, outFrames, startFrames, endFrames };
+  });
+
+  const clipItems = clipFrameRanges
+    .map(({ inFrames, outFrames, startFrames, endFrames }, i) => {
       const name = `${mediaName} seg ${i + 1}`;
 
       return `            <clipitem id="clipitem-${i + 1}">
@@ -50,8 +54,8 @@ export function exportPremiereXml(
     })
     .join("\n");
 
-  const sequenceDurationFrames = filtered.length > 0
-    ? Math.max(...filtered.map((r) => toFrames(r.outputStartSec, fps) + Math.max(0, toFrames(r.sourceEndSec, fps) - toFrames(r.sourceStartSec, fps))))
+  const sequenceDurationFrames = clipFrameRanges.length > 0
+    ? Math.max(...clipFrameRanges.map((clip) => clip.endFrames))
     : 0;
 
   return `<?xml version="1.0" encoding="UTF-8"?>

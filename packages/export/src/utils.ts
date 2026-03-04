@@ -29,3 +29,13 @@ export function mediaNameFromSource(source: SourceMediaMetadata, fallback = "sou
 export function validKeepRanges(keepRanges: KeepRange[]): KeepRange[] {
   return keepRanges.filter((r) => r.sourceEndSec > r.sourceStartSec);
 }
+
+export function normalizeKeepRanges(keepRanges: KeepRange[]): KeepRange[] {
+  return validKeepRanges(keepRanges)
+    .map((r) => ({
+      sourceStartSec: Math.max(0, r.sourceStartSec),
+      sourceEndSec: Math.max(0, r.sourceEndSec),
+      outputStartSec: Math.max(0, r.outputStartSec),
+    }))
+    .sort((a, b) => (a.outputStartSec - b.outputStartSec) || (a.sourceStartSec - b.sourceStartSec));
+}

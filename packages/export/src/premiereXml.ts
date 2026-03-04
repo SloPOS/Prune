@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { fpsToInt, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, secondsToFrames, xmlEscape } from "./utils.js";
+import { fpsToInt, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, secondsToFrames, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -8,10 +8,10 @@ export interface PremiereXmlExportOptions {
   height?: number;
 }
 
-function xmlRateBlock(fps: number): string {
+function xmlRateBlock(fps: number, ntsc: boolean): string {
   return `<rate>
             <timebase>${fps}</timebase>
-            <ntsc>FALSE</ntsc>
+            <ntsc>${ntsc ? "TRUE" : "FALSE"}</ntsc>
           </rate>`;
 }
 
@@ -51,6 +51,8 @@ export function exportPremiereXml(
 
   const sourceDurationFrames = secondsToFrames(durationSec, fps);
   const sourceTcFrames = parseTimecodeToFrames(source.timecode, fps);
+  const ntsc = isNtscFrameRate(source.fps);
+  const timecodeFormat = inferTimecodeFormat(source.timecode);
 
   const clipFrameRanges = keepRangesToFrameRanges(filtered, fps, { alreadyNormalized: true });
 
@@ -73,17 +75,17 @@ export function exportPremiereXml(
       <sequence id="sequence-1">
         <name>${xmlEscape(sequenceName)}</name>
         <duration>${sequenceDurationFrames}</duration>
-        ${xmlRateBlock(fps)}
+        ${xmlRateBlock(fps, ntsc)}
         <timecode>
-          ${xmlRateBlock(fps)}
+          ${xmlRateBlock(fps, ntsc)}
           <frame>${sourceTcFrames}</frame>
-          <displayformat>NDF</displayformat>
+          <displayformat>${timecodeFormat.displayFormat}</displayformat>
         </timecode>
         <media>
           <video>
             <format>
               <samplecharacteristics>
-                ${xmlRateBlock(fps)}
+                ${xmlRateBlock(fps, ntsc)}
                 <width>${options.width ?? 1920}</width>
                 <height>${options.height ?? 1080}</height>
               </samplecharacteristics>
@@ -97,11 +99,11 @@ ${clipItems}
       <clip id="masterclip-1">
         <name>${xmlEscape(mediaName)}</name>
         <duration>${sourceDurationFrames}</duration>
-        ${xmlRateBlock(fps)}
+        ${xmlRateBlock(fps, ntsc)}
         <timecode>
-          ${xmlRateBlock(fps)}
+          ${xmlRateBlock(fps, ntsc)}
           <frame>${sourceTcFrames}</frame>
-          <displayformat>NDF</displayformat>
+          <displayformat>${timecodeFormat.displayFormat}</displayformat>
         </timecode>
         <media>
           <video>
@@ -118,7 +120,7 @@ ${clipItems}
         <name>${xmlEscape(mediaName)}</name>
         <pathurl>${xmlEscape(pathToFileUrl(source.path))}</pathurl>
         <duration>${sourceDurationFrames}</duration>
-        ${xmlRateBlock(fps)}
+        ${xmlRateBlock(fps, ntsc)}
       </file>
     </children>
   </project>

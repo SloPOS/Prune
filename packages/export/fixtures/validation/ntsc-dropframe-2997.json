@@ -15,6 +15,7 @@
     "fcpxml": {
       "frameDuration": "1001/30000s",
       "sequenceTcStart": "107999892/30000s",
+      "tcFormat": "DF",
       "clips": [
         { "offset": "0/30000s", "start": "108150042/30000s", "duration": "30030/30000s" },
         { "offset": "30030/30000s", "start": "108225117/30000s", "duration": "22022/30000s" }
@@ -30,7 +31,9 @@
     "premiere": {
       "sequenceDuration": 53,
       "timebase": 30,
+      "ntsc": "TRUE",
       "tcFrame": 107892,
+      "displayFormat": "DF",
       "clips": [
         { "start": 0, "end": 30, "in": 150, "out": 180 },
         { "start": 30, "end": 53, "in": 225, "out": 248 }

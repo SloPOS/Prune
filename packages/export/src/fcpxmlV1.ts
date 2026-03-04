@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, normalizeFrameRate, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, rateFramesToFractionSeconds, resolveSourceDurationSec, secondsToRateFrames, xmlEscape } from "./utils.js";
+import { inferTimecodeFormat, mediaNameFromSource, normalizeFrameRate, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, rateFramesToFractionSeconds, resolveSourceDurationSec, secondsToRateFrames, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -24,6 +24,7 @@ export function exportFcpxmlV1(
   const durationSec = resolveSourceDurationSec(source, filtered);
 
   const tcStartFrames = parseTimecodeToFrames(source.timecode, Math.round(rate.fpsNum / rate.fpsDen));
+  const timecodeFormat = inferTimecodeFormat(source.timecode);
   const sequenceTcStart = rateFramesToFractionSeconds(tcStartFrames, rate);
   const mediaDuration = rateFramesToFractionSeconds(secondsToRateFrames(durationSec, rate), rate);
   const frameDuration = `${rate.fpsDen}/${rate.fpsNum}s`;
@@ -49,7 +50,7 @@ export function exportFcpxmlV1(
   <library>
     <event name="${xmlEscape(eventName)}">
       <project name="${xmlEscape(projectName)}">
-        <sequence format="r1" tcStart="${sequenceTcStart}" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+        <sequence format="r1" tcStart="${sequenceTcStart}" tcFormat="${timecodeFormat.displayFormat}" audioLayout="stereo" audioRate="48k">
           <spine>
 ${clips}
           </spine>

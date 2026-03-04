@@ -17,14 +17,16 @@ function getAttr(tag, name) {
 
 function parseFcpxml(xml) {
   const frameDuration = getAttr(xml.match(/<format[^>]+>/)?.[0] || "", "frameDuration");
-  const sequenceTcStart = getAttr(xml.match(/<sequence[^>]+>/)?.[0] || "", "tcStart");
+  const sequenceTag = xml.match(/<sequence[^>]+>/)?.[0] || "";
+  const sequenceTcStart = getAttr(sequenceTag, "tcStart");
+  const tcFormat = getAttr(sequenceTag, "tcFormat");
   const clipMatches = [...xml.matchAll(/<asset-clip[^>]+\/>/g)].map((m) => m[0]);
   const clips = clipMatches.map((tag) => ({
     offset: getAttr(tag, "offset"),
     start: getAttr(tag, "start"),
     duration: getAttr(tag, "duration"),
   }));
-  return { frameDuration, sequenceTcStart, clips };
+  return { frameDuration, sequenceTcStart, tcFormat, clips };
 }
 
 function parseEdl(edl) {
@@ -46,7 +48,9 @@ function parseEdl(edl) {
 function parsePremiereXml(xml) {
   const sequenceDuration = Number((xml.match(/<sequence id="sequence-1">[\s\S]*?<duration>(\d+)<\/duration>/) || [])[1] || 0);
   const timebase = Number((xml.match(/<sequence id="sequence-1">[\s\S]*?<timebase>(\d+)<\/timebase>/) || [])[1] || 0);
+  const sequenceNtsc = (xml.match(/<sequence id="sequence-1">[\s\S]*?<ntsc>(TRUE|FALSE)<\/ntsc>/) || [])[1] || null;
   const tcFrame = Number((xml.match(/<sequence id="sequence-1">[\s\S]*?<frame>(\d+)<\/frame>/) || [])[1] || 0);
+  const tcDisplayFormat = (xml.match(/<sequence id="sequence-1">[\s\S]*?<displayformat>(DF|NDF)<\/displayformat>/) || [])[1] || null;
 
   const clipChunks = [...xml.matchAll(/<clipitem id="clipitem-\d+">([\s\S]*?)<\/clipitem>/g)].map((m) => m[1]);
   const clips = clipChunks.map((chunk) => ({
@@ -63,7 +67,9 @@ function parsePremiereXml(xml) {
   return {
     sequenceDuration,
     timebase,
+    sequenceNtsc,
     tcFrame,
+    tcDisplayFormat,
     clips,
     hasEscapedFileAnywhere: /&lt;file\b/.test(xml),
     hasMasterFileNode: /<file id="file-1"\s*(?:\/>|><\/file>)/.test(masterClipChunk),
@@ -96,6 +102,9 @@ function runFixture(fixturePath) {
 
   assert.equal(fcpxmlParsed.frameDuration, expect.fcpxml.frameDuration, `${fixture.name}: frameDuration`);
   assert.equal(fcpxmlParsed.sequenceTcStart, expect.fcpxml.sequenceTcStart, `${fixture.name}: sequence tcStart`);
+  if (expect.fcpxml.tcFormat) {
+    assert.equal(fcpxmlParsed.tcFormat, expect.fcpxml.tcFormat, `${fixture.name}: FCPXML tcFormat`);
+  }
   assert.deepEqual(fcpxmlParsed.clips, expect.fcpxml.clips, `${fixture.name}: FCPXML clip boundaries`);
 
   assert.equal(edlParsed.title, expect.edl.title, `${fixture.name}: EDL title`);
@@ -111,7 +120,13 @@ function runFixture(fixturePath) {
     const premiereParsed = parsePremiereXml(premiereXml);
     assert.equal(premiereParsed.sequenceDuration, expect.premiere.sequenceDuration, `${fixture.name}: Premiere sequence duration`);
     assert.equal(premiereParsed.timebase, expect.premiere.timebase, `${fixture.name}: Premiere timebase`);
+    if (expect.premiere.ntsc) {
+      assert.equal(premiereParsed.sequenceNtsc, expect.premiere.ntsc, `${fixture.name}: Premiere ntsc flag`);
+    }
     assert.equal(premiereParsed.tcFrame, expect.premiere.tcFrame, `${fixture.name}: Premiere tc frame`);
+    if (expect.premiere.displayFormat) {
+      assert.equal(premiereParsed.tcDisplayFormat, expect.premiere.displayFormat, `${fixture.name}: Premiere display format`);
+    }
     assert.deepEqual(
       premiereParsed.clips.map((clip) => ({
         start: clip.start,

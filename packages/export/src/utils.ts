@@ -92,6 +92,11 @@ export interface FrameRate {
   fpsDen: number;
 }
 
+export interface TimecodeFormatInfo {
+  dropFrame: boolean;
+  displayFormat: "DF" | "NDF";
+}
+
 const NTSC_FRAME_RATES: Array<{ fps: number; rate: FrameRate }> = [
   { fps: 23.976, rate: { fpsNum: 24000, fpsDen: 1001 } },
   { fps: 29.97, rate: { fpsNum: 30000, fpsDen: 1001 } },
@@ -110,6 +115,18 @@ export function normalizeFrameRate(fps: number): FrameRate {
 
   const scale = 1000;
   return { fpsNum: Math.round(safeFps * scale), fpsDen: scale };
+}
+
+export function isNtscFrameRate(fps: number): boolean {
+  return normalizeFrameRate(fps).fpsDen !== 1;
+}
+
+export function inferTimecodeFormat(timecode: string): TimecodeFormatInfo {
+  const dropFrame = /;\d{2}$/.test(String(timecode || "").trim());
+  return {
+    dropFrame,
+    displayFormat: dropFrame ? "DF" : "NDF",
+  };
 }
 
 export function secondsToRateFrames(sec: number, rate: FrameRate): number {

@@ -2057,6 +2057,7 @@ export function App() {
                     <input
                       className="tokenInlineEditor"
                       value={editingTokenDraft}
+                      style={{ width: `${Math.max(1, editingTokenDraft.length + 1)}ch` }}
                       autoFocus
                       onFocus={(e) => e.currentTarget.select()}
                       onChange={(e) => setEditingTokenDraft(e.target.value)}

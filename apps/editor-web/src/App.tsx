@@ -21,6 +21,11 @@ type BrowserEntry = {
 type RootConfig = { id: string; name: string; path: string };
 type SelectedMedia = { root: RootName; path: string; name: string } | null;
 type TranscriptSource = { root: RootName; path: string } | null;
+type UiTab = "media" | "transcript" | "tools" | "render";
+type OptionalUiTab = UiTab | null;
+type RenderSection = "video" | "editor" | "subs" | "script";
+type DesktopRenderSection = "video" | "project" | "subs";
+type ModalDragKey = "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName";
 
 const APP_VERSION = "1.0.1";
 type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
@@ -133,12 +138,12 @@ export function App() {
   const [splitLeftPct, setSplitLeftPct] = useState<number>(40);
   const [isResizing, setIsResizing] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
-  const [mobileTab, setMobileTab] = useState<"media" | "transcript" | "tools" | "render">("media");
-  const [filePickerModalTab, setFilePickerModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
-  const [transcriptPromptTab, setTranscriptPromptTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
-  const [transcribeModalTab, setTranscribeModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
-  const [exportModalTab, setExportModalTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
-  const [renderPanelTab, setRenderPanelTab] = useState<"media" | "transcript" | "tools" | "render" | null>(null);
+  const [mobileTab, setMobileTab] = useState<UiTab>("media");
+  const [filePickerModalTab, setFilePickerModalTab] = useState<OptionalUiTab>(null);
+  const [transcriptPromptTab, setTranscriptPromptTab] = useState<OptionalUiTab>(null);
+  const [transcribeModalTab, setTranscribeModalTab] = useState<OptionalUiTab>(null);
+  const [exportModalTab, setExportModalTab] = useState<OptionalUiTab>(null);
+  const [renderPanelTab, setRenderPanelTab] = useState<OptionalUiTab>(null);
   const splitRef = useRef<HTMLDivElement | null>(null);
 
   const [roots, setRoots] = useState<RootConfig[]>([]);
@@ -184,8 +189,8 @@ export function App() {
   const [renderResolution, setRenderResolution] = useState("source");
   const [renderFps, setRenderFps] = useState("source");
   const [renderSourceInfo, setRenderSourceInfo] = useState<any>(null);
-  const [mobileRenderSection, setMobileRenderSection] = useState<"video" | "editor" | "subs" | "script">("video");
-  const [desktopRenderSection, setDesktopRenderSection] = useState<"video" | "project" | "subs">("video");
+  const [mobileRenderSection, setMobileRenderSection] = useState<RenderSection>("video");
+  const [desktopRenderSection, setDesktopRenderSection] = useState<DesktopRenderSection>("video");
   const [showExportProgressModal, setShowExportProgressModal] = useState(false);
   const [notifyWhenRenderReady, setNotifyWhenRenderReady] = useState(true);
   const [autoDownloadWhenReady, setAutoDownloadWhenReady] = useState(false);
@@ -206,7 +211,7 @@ export function App() {
   const [loadProjectModalOffset, setLoadProjectModalOffset] = useState({ x: 0, y: 0 });
   const [confirmDeleteModalOffset, setConfirmDeleteModalOffset] = useState({ x: 0, y: 0 });
   const [projectNameModalOffset, setProjectNameModalOffset] = useState({ x: 0, y: 0 });
-  const [draggingModal, setDraggingModal] = useState<null | { key: "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName"; startX: number; startY: number; originX: number; originY: number }>(null);
+  const [draggingModal, setDraggingModal] = useState<null | { key: ModalDragKey; startX: number; startY: number; originX: number; originY: number }>(null);
   const [loadingUiMessage, setLoadingUiMessage] = useState<string | null>(null);
   const [showFilePickerModal, setShowFilePickerModal] = useState(false);
   const [filePickerIntent, setFilePickerIntent] = useState<"media" | "json">("media");

@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, xmlEscape } from "./utils.js";
+import { fpsToInt, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, secondsToFrames, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -8,17 +8,14 @@ export interface PremiereXmlExportOptions {
   height?: number;
 }
 
-function toFrames(sec: number, fps: number): number {
-  const fpsInt = Math.max(1, Math.round(fps));
-  return Math.max(0, Math.round(sec * fpsInt));
-}
+// frame conversion helpers are centralized in utils.ts
 
 export function exportPremiereXml(
   keepRanges: KeepRange[],
   source: SourceMediaMetadata,
   options: PremiereXmlExportOptions = {},
 ): string {
-  const fps = Math.max(1, Math.round(source.fps));
+  const fps = fpsToInt(source.fps);
   const mediaName = mediaNameFromSource(source);
   const sequenceName = options.sequenceName ?? options.projectName ?? "Bit Cut Timeline";
   const projectName = options.projectName ?? sequenceName;
@@ -27,13 +24,13 @@ export function exportPremiereXml(
   const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
   const durationSec = source.durationSec ?? inferredDurationSec;
 
-  const sourceDurationFrames = toFrames(durationSec, fps);
+  const sourceDurationFrames = secondsToFrames(durationSec, fps);
   const sourceTcFrames = parseTimecodeToFrames(source.timecode, fps);
 
   const clipFrameRanges = filtered.map((range) => {
-    const inFrames = toFrames(range.sourceStartSec, fps);
-    const outFrames = toFrames(range.sourceEndSec, fps);
-    const startFrames = toFrames(range.outputStartSec, fps);
+    const inFrames = secondsToFrames(range.sourceStartSec, fps);
+    const outFrames = secondsToFrames(range.sourceEndSec, fps);
+    const startFrames = secondsToFrames(range.outputStartSec, fps);
     const endFrames = startFrames + Math.max(0, outFrames - inFrames);
     return { inFrames, outFrames, startFrames, endFrames };
   });

@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, normalizeKeepRanges } from "./utils.js";
+import { framesToTimecode, mediaNameFromSource, normalizeKeepRanges, secondsToFrames } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -12,14 +12,7 @@ function cleanReel(value: string): string {
 }
 
 function toTc(sec: number, fps: number): string {
-  const fpsInt = Math.max(1, Math.round(fps));
-  const totalFrames = Math.max(0, Math.round(sec * fpsInt));
-  const hh = Math.floor(totalFrames / (fpsInt * 3600));
-  const mm = Math.floor((totalFrames % (fpsInt * 3600)) / (fpsInt * 60));
-  const ss = Math.floor((totalFrames % (fpsInt * 60)) / fpsInt);
-  const ff = totalFrames % fpsInt;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(ff)}`;
+  return framesToTimecode(secondsToFrames(sec, fps), fps);
 }
 
 export function exportEdlCmx3600(

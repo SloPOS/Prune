@@ -14,6 +14,25 @@ export function pathToFileUrl(path: string): string {
   return `file://${encodeURI(path.replaceAll("\\", "/"))}`;
 }
 
+export function fpsToInt(fps: number): number {
+  return Math.max(1, Math.round(fps));
+}
+
+export function secondsToFrames(sec: number, fps: number): number {
+  return Math.max(0, Math.round(sec * fpsToInt(fps)));
+}
+
+export function framesToTimecode(totalFrames: number, fps: number): string {
+  const fpsInt = fpsToInt(fps);
+  const frames = Math.max(0, Math.round(totalFrames));
+  const hh = Math.floor(frames / (fpsInt * 3600));
+  const mm = Math.floor((frames % (fpsInt * 3600)) / (fpsInt * 60));
+  const ss = Math.floor((frames % (fpsInt * 60)) / fpsInt);
+  const ff = frames % fpsInt;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(ff)}`;
+}
+
 export function parseTimecodeToFrames(timecode: string, fpsInt: number): number {
   const match = /^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(timecode);
   if (!match) return 0;

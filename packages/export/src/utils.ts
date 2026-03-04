@@ -75,9 +75,16 @@ export function framesToTimecode(totalFrames: number, fps: number, options: { dr
   return frameCountToNdfTimecode(totalFrames, fpsInt);
 }
 
-export function createTimecodeFormatter(fps: number, options: { dropFrame?: boolean } = {}): (totalFrames: number) => string {
+export function createTimecodeFormatter(
+  fps: number,
+  options: { dropFrame?: boolean; maxCacheEntries?: number } = {},
+): (totalFrames: number) => string {
   const fpsInt = fpsToInt(fps);
   const useDropFrame = Boolean(options.dropFrame && (fpsInt === 30 || fpsInt === 60));
+  const requestedMaxCacheEntries = options.maxCacheEntries;
+  const maxCacheEntries = typeof requestedMaxCacheEntries === "number" && Number.isFinite(requestedMaxCacheEntries)
+    ? Math.max(0, Math.floor(requestedMaxCacheEntries))
+    : 5000;
   const cache = new Map<number, string>();
 
   return (totalFrames: number): string => {
@@ -89,7 +96,10 @@ export function createTimecodeFormatter(fps: number, options: { dropFrame?: bool
       ? frameCountToDfTimecode(normalizedFrames, fpsInt)
       : frameCountToNdfTimecode(normalizedFrames, fpsInt);
 
-    cache.set(normalizedFrames, timecode);
+    if (maxCacheEntries > 0) {
+      if (cache.size >= maxCacheEntries) cache.clear();
+      cache.set(normalizedFrames, timecode);
+    }
     return timecode;
   };
 }

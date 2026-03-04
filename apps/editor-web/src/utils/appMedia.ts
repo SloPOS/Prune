@@ -38,10 +38,35 @@ export function normalizeTokens(input: unknown): WordToken[] {
 }
 
 export function tokenAtTime(tokens: WordToken[], timeSec: number): number {
-  for (let i = 0; i < tokens.length; i += 1) {
-    const t = tokens[i]!;
-    if (timeSec >= t.startSec && timeSec <= t.endSec) return i;
+  if (!Number.isFinite(timeSec) || tokens.length === 0) return -1;
+
+  let left = 0;
+  let right = tokens.length - 1;
+
+  while (left <= right) {
+    const mid = (left + right) >> 1;
+    const token = tokens[mid]!;
+
+    if (timeSec < token.startSec) {
+      right = mid - 1;
+      continue;
+    }
+
+    if (timeSec > token.endSec) {
+      left = mid + 1;
+      continue;
+    }
+
+    let firstMatch = mid;
+    while (firstMatch > 0) {
+      const prev = tokens[firstMatch - 1]!;
+      if (!(timeSec >= prev.startSec && timeSec <= prev.endSec)) break;
+      firstMatch -= 1;
+    }
+
+    return firstMatch;
   }
+
   return -1;
 }
 

@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { fpsToInt, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, secondsToFrames, xmlEscape } from "./utils.js";
+import { fpsToInt, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, secondsToFrames, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -27,13 +27,7 @@ export function exportPremiereXml(
   const sourceDurationFrames = secondsToFrames(durationSec, fps);
   const sourceTcFrames = parseTimecodeToFrames(source.timecode, fps);
 
-  const clipFrameRanges = filtered.map((range) => {
-    const inFrames = secondsToFrames(range.sourceStartSec, fps);
-    const outFrames = secondsToFrames(range.sourceEndSec, fps);
-    const startFrames = secondsToFrames(range.outputStartSec, fps);
-    const endFrames = startFrames + Math.max(0, outFrames - inFrames);
-    return { inFrames, outFrames, startFrames, endFrames };
-  });
+  const clipFrameRanges = keepRangesToFrameRanges(filtered, fps, { alreadyNormalized: true });
 
   const clipItems = clipFrameRanges
     .map(({ inFrames, outFrames, startFrames, endFrames }, i) => {

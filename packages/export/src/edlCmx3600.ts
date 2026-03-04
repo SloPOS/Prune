@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { framesToTimecode, mediaNameFromSource, normalizeKeepRanges, secondsToFrames } from "./utils.js";
+import { framesToTimecode, keepRangesToFrameRanges, mediaNameFromSource } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -11,10 +11,6 @@ function cleanReel(value: string): string {
   return (trimmed || "AX").slice(0, 8);
 }
 
-function toTc(sec: number, fps: number): string {
-  return framesToTimecode(secondsToFrames(sec, fps), fps);
-}
-
 export function exportEdlCmx3600(
   keepRanges: KeepRange[],
   source: SourceMediaMetadata,
@@ -24,18 +20,17 @@ export function exportEdlCmx3600(
   const clipName = mediaNameFromSource(source, "source");
   const reel = cleanReel(options.reel || source.name || source.path.split("/").pop() || "AX");
   const fps = source.fps;
+  const frameRanges = keepRangesToFrameRanges(keepRanges, fps);
 
   const lines: string[] = [];
   lines.push(`TITLE: ${title}`);
   lines.push("FCM: NON-DROP FRAME");
   lines.push("");
 
-  normalizeKeepRanges(keepRanges).forEach((r, i) => {
-    const recIn = r.outputStartSec;
-    const recOut = r.outputStartSec + (r.sourceEndSec - r.sourceStartSec);
+  frameRanges.forEach((r, i) => {
     const event = String(i + 1).padStart(3, "0");
     lines.push(
-      `${event}  ${reel.padEnd(8, " ")} V     C        ${toTc(r.sourceStartSec, fps)} ${toTc(r.sourceEndSec, fps)} ${toTc(recIn, fps)} ${toTc(recOut, fps)}`,
+      `${event}  ${reel.padEnd(8, " ")} V     C        ${framesToTimecode(r.inFrames, fps)} ${framesToTimecode(r.outFrames, fps)} ${framesToTimecode(r.startFrames, fps)} ${framesToTimecode(r.endFrames, fps)}`,
     );
     lines.push(`* FROM CLIP NAME: ${clipName}`);
   });

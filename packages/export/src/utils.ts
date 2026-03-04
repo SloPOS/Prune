@@ -58,3 +58,25 @@ export function normalizeKeepRanges(keepRanges: KeepRange[]): KeepRange[] {
     }))
     .sort((a, b) => (a.outputStartSec - b.outputStartSec) || (a.sourceStartSec - b.sourceStartSec));
 }
+
+export interface FrameKeepRange {
+  inFrames: number;
+  outFrames: number;
+  startFrames: number;
+  endFrames: number;
+}
+
+export function keepRangesToFrameRanges(
+  keepRanges: KeepRange[],
+  fps: number,
+  options: { alreadyNormalized?: boolean } = {},
+): FrameKeepRange[] {
+  const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
+  return ranges.map((range) => {
+    const inFrames = secondsToFrames(range.sourceStartSec, fps);
+    const outFrames = secondsToFrames(range.sourceEndSec, fps);
+    const startFrames = secondsToFrames(range.outputStartSec, fps);
+    const endFrames = startFrames + Math.max(0, outFrames - inFrames);
+    return { inFrames, outFrames, startFrames, endFrames };
+  });
+}

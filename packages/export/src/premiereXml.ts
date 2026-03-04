@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { fpsToInt, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, secondsToFrames, xmlEscape } from "./utils.js";
+import { fpsToInt, keepRangesToFrameRanges, mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, secondsToFrames, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -47,8 +47,7 @@ export function exportPremiereXml(
   const projectName = options.projectName ?? sequenceName;
 
   const filtered = normalizeKeepRanges(keepRanges);
-  const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
-  const durationSec = source.durationSec ?? inferredDurationSec;
+  const durationSec = resolveSourceDurationSec(source, filtered);
 
   const sourceDurationFrames = secondsToFrames(durationSec, fps);
   const sourceTcFrames = parseTimecodeToFrames(source.timecode, fps);

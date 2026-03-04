@@ -59,6 +59,15 @@ export function normalizeKeepRanges(keepRanges: KeepRange[]): KeepRange[] {
     .sort((a, b) => (a.outputStartSec - b.outputStartSec) || (a.sourceStartSec - b.sourceStartSec));
 }
 
+export function resolveSourceDurationSec(source: SourceMediaMetadata, keepRanges: KeepRange[]): number {
+  if (typeof source.durationSec === "number") {
+    return Math.max(0, source.durationSec);
+  }
+
+  const inferredDurationSec = Math.max(0, ...keepRanges.map((r) => r.sourceEndSec));
+  return inferredDurationSec;
+}
+
 export interface FrameKeepRange {
   inFrames: number;
   outFrames: number;

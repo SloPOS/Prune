@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, xmlEscape } from "./utils.js";
+import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -55,8 +55,7 @@ export function exportFcpxmlV1(
   const sequenceName = options.sequenceName ?? projectName;
 
   const filtered = normalizeKeepRanges(keepRanges);
-  const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
-  const durationSec = source.durationSec ?? inferredDurationSec;
+  const durationSec = resolveSourceDurationSec(source, filtered);
 
   const tcStartFrames = parseTimecodeToFrames(source.timecode, Math.round(rate.fpsNum / rate.fpsDen));
   const sequenceTcStart = fromFrames(tcStartFrames, rate);

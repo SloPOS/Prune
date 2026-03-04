@@ -316,24 +316,8 @@ export function App() {
     const onMove = (e: MouseEvent) => {
       const nextX = draggingModal.originX + (e.clientX - draggingModal.startX);
       const nextY = draggingModal.originY + (e.clientY - draggingModal.startY);
-      const setByKey: Record<string, { ref: HTMLDivElement | null; set: (v: { x: number; y: number }) => void }> = {
-        export: { ref: exportModalRef.current, set: setExportModalOffset },
-        render: { ref: renderModalRef.current, set: setRenderModalOffset },
-        progress: { ref: progressModalRef.current, set: setProgressModalOffset },
-        settings: { ref: settingsModalRef.current, set: setSettingsModalOffset },
-        about: { ref: aboutModalRef.current, set: setAboutModalOffset },
-        dirPicker: { ref: dirPickerModalRef.current, set: setDirPickerModalOffset },
-        filePicker: { ref: filePickerModalRef.current, set: setFilePickerModalOffset },
-        transcribe: { ref: transcribeModalRef.current, set: setTranscribeModalOffset },
-        transcriptPrompt: { ref: transcriptPromptModalRef.current, set: setTranscriptPromptModalOffset },
-        search: { ref: searchModalRef.current, set: setSearchModalOffset },
-        loadProject: { ref: loadProjectModalRef.current, set: setLoadProjectModalOffset },
-        confirmDelete: { ref: confirmDeleteModalRef.current, set: setConfirmDeleteModalOffset },
-        projectName: { ref: projectNameModalRef.current, set: setProjectNameModalOffset },
-      };
-      const target = setByKey[draggingModal.key];
-      if (!target) return;
-      target.set(clampModalOffset(nextX, nextY, target.ref));
+      const modalRef = getModalRefByKey(draggingModal.key);
+      setModalOffsetByKey(draggingModal.key, clampModalOffset(nextX, nextY, modalRef));
     };
     const onUp = () => setDraggingModal(null);
     window.addEventListener("mousemove", onMove);
@@ -510,6 +494,63 @@ export function App() {
   const desktopModalStyle = (offset: { x: number; y: number }) => (
     isMobileLayout ? undefined : { position: "fixed" as const, left: "50%", top: "50%", transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)` }
   );
+
+  function getModalRefByKey(key: ModalDragKey): HTMLDivElement | null {
+    switch (key) {
+      case "export": return exportModalRef.current;
+      case "render": return renderModalRef.current;
+      case "progress": return progressModalRef.current;
+      case "settings": return settingsModalRef.current;
+      case "about": return aboutModalRef.current;
+      case "dirPicker": return dirPickerModalRef.current;
+      case "filePicker": return filePickerModalRef.current;
+      case "transcribe": return transcribeModalRef.current;
+      case "transcriptPrompt": return transcriptPromptModalRef.current;
+      case "search": return searchModalRef.current;
+      case "loadProject": return loadProjectModalRef.current;
+      case "confirmDelete": return confirmDeleteModalRef.current;
+      case "projectName": return projectNameModalRef.current;
+      default: return null;
+    }
+  }
+
+  function getModalOffsetByKey(key: ModalDragKey): { x: number; y: number } {
+    switch (key) {
+      case "export": return exportModalOffset;
+      case "render": return renderModalOffset;
+      case "progress": return progressModalOffset;
+      case "settings": return settingsModalOffset;
+      case "about": return aboutModalOffset;
+      case "dirPicker": return dirPickerModalOffset;
+      case "filePicker": return filePickerModalOffset;
+      case "transcribe": return transcribeModalOffset;
+      case "transcriptPrompt": return transcriptPromptModalOffset;
+      case "search": return searchModalOffset;
+      case "loadProject": return loadProjectModalOffset;
+      case "confirmDelete": return confirmDeleteModalOffset;
+      case "projectName": return projectNameModalOffset;
+      default: return { x: 0, y: 0 };
+    }
+  }
+
+  function setModalOffsetByKey(key: ModalDragKey, value: { x: number; y: number }) {
+    switch (key) {
+      case "export": setExportModalOffset(value); break;
+      case "render": setRenderModalOffset(value); break;
+      case "progress": setProgressModalOffset(value); break;
+      case "settings": setSettingsModalOffset(value); break;
+      case "about": setAboutModalOffset(value); break;
+      case "dirPicker": setDirPickerModalOffset(value); break;
+      case "filePicker": setFilePickerModalOffset(value); break;
+      case "transcribe": setTranscribeModalOffset(value); break;
+      case "transcriptPrompt": setTranscriptPromptModalOffset(value); break;
+      case "search": setSearchModalOffset(value); break;
+      case "loadProject": setLoadProjectModalOffset(value); break;
+      case "confirmDelete": setConfirmDeleteModalOffset(value); break;
+      case "projectName": setProjectNameModalOffset(value); break;
+      default: break;
+    }
+  }
 
   const timingDiffSec = Math.abs(videoDurationSec - transcriptDurationSec);
   const timingValid = videoDurationSec > 0 && transcriptDurationSec > 0;
@@ -923,25 +964,10 @@ export function App() {
     await openFileEntry(selectedEntry.root, selectedEntry.relPath);
   }
 
-  function beginModalDrag(key: "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName", event: React.MouseEvent<HTMLDivElement>) {
+  function beginModalDrag(key: ModalDragKey, event: React.MouseEvent<HTMLDivElement>) {
     if (isMobileLayout) return;
     event.preventDefault();
-    const origins: Record<string, { x: number; y: number }> = {
-      export: exportModalOffset,
-      render: renderModalOffset,
-      progress: progressModalOffset,
-      settings: settingsModalOffset,
-      about: aboutModalOffset,
-      dirPicker: dirPickerModalOffset,
-      filePicker: filePickerModalOffset,
-      transcribe: transcribeModalOffset,
-      transcriptPrompt: transcriptPromptModalOffset,
-      search: searchModalOffset,
-      loadProject: loadProjectModalOffset,
-      confirmDelete: confirmDeleteModalOffset,
-      projectName: projectNameModalOffset,
-    };
-    const origin = origins[key] || { x: 0, y: 0 };
+    const origin = getModalOffsetByKey(key);
     setDraggingModal({ key, startX: event.clientX, startY: event.clientY, originX: origin.x, originY: origin.y });
   }
 

@@ -338,10 +338,37 @@ function runCrossFormatContinuityChecks() {
   assert.match(tailTc, /^\d\d:\d\d:\d\d:\d\d$/, "continuity tail timecode formatting sanity");
 }
 
+function runInvalidFpsFallbackChecks() {
+  const fallbackFps = 30;
+  const source = {
+    path: "/media/invalid-fps.mov",
+    name: "invalid-fps.mov",
+    fps: Number.NaN,
+    timecode: "00:00:00:00",
+    durationSec: 20,
+  };
+  const keepRanges = [
+    { sourceStartSec: 0, sourceEndSec: 2, outputStartSec: 0 },
+    { sourceStartSec: 5, sourceEndSec: 7.5, outputStartSec: 2 },
+  ];
+
+  const expected = canonicalFromKeepRanges(keepRanges, fallbackFps);
+  const fcpxml = parseFcpxmlSegments(exportFcpxmlV1(keepRanges, source), 0, fallbackFps);
+  const edl = parseEdlSegments(exportEdlCmx3600(keepRanges, source), fallbackFps);
+  const premiere = parsePremiereSegments(exportPremiereXml(keepRanges, source));
+  const manifest = canonicalFromKeepRanges(buildAafBridgeManifest(keepRanges, source).keepRanges, fallbackFps);
+
+  assert.deepEqual(fcpxml, expected, "invalid fps fallback: fcpxml parity");
+  assert.deepEqual(edl, expected, "invalid fps fallback: edl parity");
+  assert.deepEqual(premiere, expected, "invalid fps fallback: premiere parity");
+  assert.deepEqual(manifest, expected, "invalid fps fallback: aaf manifest parity");
+}
+
 runGoldenParity();
 runFuzz();
 runDownloadContractChecks();
 runAafPackageSmoke();
 runCrossFormatContinuityChecks();
+runInvalidFpsFallbackChecks();
 
 console.log("Interop suite passed: parity, fuzz, download contracts, AAF bridge smoke, continuity.");

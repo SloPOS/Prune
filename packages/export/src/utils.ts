@@ -14,7 +14,12 @@ export function pathToFileUrl(path: string): string {
   return `file://${encodeURI(path.replaceAll("\\", "/"))}`;
 }
 
+const DEFAULT_FPS = 30;
+
 export function fpsToInt(fps: number): number {
+  if (!Number.isFinite(fps) || fps <= 0) {
+    return DEFAULT_FPS;
+  }
   return Math.max(1, Math.round(fps));
 }
 
@@ -37,8 +42,9 @@ export function parseTimecodeToFrames(timecode: string, fpsInt: number): number 
   const match = /^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(timecode);
   if (!match) return 0;
 
+  const effectiveFps = fpsToInt(fpsInt);
   const [, hh, mm, ss, ff] = match;
-  return (((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * fpsInt) + Number(ff);
+  return (((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * effectiveFps) + Number(ff);
 }
 
 export function mediaNameFromSource(source: SourceMediaMetadata, fallback = "source-media"): string {
@@ -80,16 +86,17 @@ const NTSC_FRAME_RATES: Array<{ fps: number; rate: FrameRate }> = [
 ];
 
 export function normalizeFrameRate(fps: number): FrameRate {
-  const ntsc = NTSC_FRAME_RATES.find((r) => Math.abs(r.fps - fps) < 0.001);
+  const safeFps = Number.isFinite(fps) && fps > 0 ? fps : DEFAULT_FPS;
+  const ntsc = NTSC_FRAME_RATES.find((r) => Math.abs(r.fps - safeFps) < 0.001);
   if (ntsc) return ntsc.rate;
 
-  const rounded = Math.round(fps);
-  if (Math.abs(rounded - fps) < 0.001 && rounded > 0) {
+  const rounded = Math.round(safeFps);
+  if (Math.abs(rounded - safeFps) < 0.001 && rounded > 0) {
     return { fpsNum: rounded, fpsDen: 1 };
   }
 
   const scale = 1000;
-  return { fpsNum: Math.round(fps * scale), fpsDen: scale };
+  return { fpsNum: Math.round(safeFps * scale), fpsDen: scale };
 }
 
 export function secondsToRateFrames(sec: number, rate: FrameRate): number {

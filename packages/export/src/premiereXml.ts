@@ -1,16 +1,5 @@
-export interface KeepRange {
-  sourceStartSec: number;
-  sourceEndSec: number;
-  outputStartSec: number;
-}
-
-export interface SourceMediaMetadata {
-  path: string;
-  fps: number;
-  timecode: string;
-  durationSec?: number;
-  name?: string;
-}
+import type { KeepRange, SourceMediaMetadata } from "./types.js";
+import { mediaNameFromSource, parseTimecodeToFrames, pathToFileUrl, validKeepRanges, xmlEscape } from "./utils.js";
 
 export interface PremiereXmlExportOptions {
   projectName?: string;
@@ -19,33 +8,9 @@ export interface PremiereXmlExportOptions {
   height?: number;
 }
 
-function xmlEscape(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 function toFrames(sec: number, fps: number): number {
   const fpsInt = Math.max(1, Math.round(fps));
   return Math.max(0, Math.round(sec * fpsInt));
-}
-
-function parseTimecodeToFrames(timecode: string, fps: number): number {
-  const match = /^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(timecode);
-  if (!match) return 0;
-
-  const [, hh, mm, ss, ff] = match;
-  const fpsInt = Math.max(1, Math.round(fps));
-
-  return (((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * fpsInt) + Number(ff);
-}
-
-function pathToUrl(path: string): string {
-  if (path.startsWith("file://")) return path;
-  return `file://${encodeURI(path.replaceAll("\\", "/"))}`;
 }
 
 export function exportPremiereXml(
@@ -54,11 +19,11 @@ export function exportPremiereXml(
   options: PremiereXmlExportOptions = {},
 ): string {
   const fps = Math.max(1, Math.round(source.fps));
-  const mediaName = source.name ?? source.path.split("/").pop() ?? "source-media";
+  const mediaName = mediaNameFromSource(source);
   const sequenceName = options.sequenceName ?? options.projectName ?? "Bit Cut Timeline";
   const projectName = options.projectName ?? sequenceName;
 
-  const filtered = keepRanges.filter((r) => r.sourceEndSec > r.sourceStartSec);
+  const filtered = validKeepRanges(keepRanges);
   const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
   const durationSec = source.durationSec ?? inferredDurationSec;
 
@@ -155,7 +120,7 @@ ${clipItems}
       </clip>
       <file id="file-1">
         <name>${xmlEscape(mediaName)}</name>
-        <pathurl>${xmlEscape(pathToUrl(source.path))}</pathurl>
+        <pathurl>${xmlEscape(pathToFileUrl(source.path))}</pathurl>
         <duration>${sourceDurationFrames}</duration>
         <rate>
           <timebase>${fps}</timebase>

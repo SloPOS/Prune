@@ -1,16 +1,5 @@
-export interface KeepRange {
-  sourceStartSec: number;
-  sourceEndSec: number;
-  outputStartSec: number;
-}
-
-export interface SourceMediaMetadata {
-  path: string;
-  fps: number;
-  timecode: string;
-  durationSec?: number;
-  name?: string;
-}
+import type { KeepRange, SourceMediaMetadata } from "./types.js";
+import { mediaNameFromSource, validKeepRanges } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -39,6 +28,7 @@ export function exportEdlCmx3600(
   options: EdlExportOptions = {},
 ): string {
   const title = (options.title || "PRUNE").replace(/[^A-Za-z0-9 _-]/g, "_").slice(0, 64);
+  const clipName = mediaNameFromSource(source, "source");
   const reel = cleanReel(options.reel || source.name || source.path.split("/").pop() || "AX");
   const fps = source.fps;
 
@@ -47,17 +37,15 @@ export function exportEdlCmx3600(
   lines.push("FCM: NON-DROP FRAME");
   lines.push("");
 
-  keepRanges
-    .filter((r) => r.sourceEndSec > r.sourceStartSec)
-    .forEach((r, i) => {
-      const recIn = r.outputStartSec;
-      const recOut = r.outputStartSec + (r.sourceEndSec - r.sourceStartSec);
-      const event = String(i + 1).padStart(3, "0");
-      lines.push(
-        `${event}  ${reel.padEnd(8, " ")} V     C        ${toTc(r.sourceStartSec, fps)} ${toTc(r.sourceEndSec, fps)} ${toTc(recIn, fps)} ${toTc(recOut, fps)}`,
-      );
-      lines.push(`* FROM CLIP NAME: ${source.name || source.path.split("/").pop() || "source"}`);
-    });
+  validKeepRanges(keepRanges).forEach((r, i) => {
+    const recIn = r.outputStartSec;
+    const recOut = r.outputStartSec + (r.sourceEndSec - r.sourceStartSec);
+    const event = String(i + 1).padStart(3, "0");
+    lines.push(
+      `${event}  ${reel.padEnd(8, " ")} V     C        ${toTc(r.sourceStartSec, fps)} ${toTc(r.sourceEndSec, fps)} ${toTc(recIn, fps)} ${toTc(recOut, fps)}`,
+    );
+    lines.push(`* FROM CLIP NAME: ${clipName}`);
+  });
 
   lines.push("");
   return lines.join("\n");

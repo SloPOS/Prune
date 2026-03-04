@@ -1,4 +1,4 @@
-import type { KeepRange, SourceMediaMetadata } from "./fcpxmlV1.js";
+import type { KeepRange, SourceMediaMetadata } from "./types.js";
 
 export interface AafBridgeManifest {
   schemaVersion: 1;

@@ -1,4 +1,5 @@
-export type { KeepRange, SourceMediaMetadata, FcpxmlV1ExportOptions } from "./fcpxmlV1.js";
+export type { KeepRange, SourceMediaMetadata } from "./types.js";
+export type { FcpxmlV1ExportOptions } from "./fcpxmlV1.js";
 export { exportFcpxmlV1 } from "./fcpxmlV1.js";
 
 export type { EdlExportOptions } from "./edlCmx3600.js";

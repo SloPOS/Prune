@@ -1,16 +1,5 @@
-export interface KeepRange {
-  sourceStartSec: number;
-  sourceEndSec: number;
-  outputStartSec: number;
-}
-
-export interface SourceMediaMetadata {
-  path: string;
-  fps: number;
-  timecode: string;
-  durationSec?: number;
-  name?: string;
-}
+import type { KeepRange, SourceMediaMetadata } from "./types.js";
+import { mediaNameFromSource, parseTimecodeToFrames, pathToFileUrl, validKeepRanges, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -54,56 +43,27 @@ function fromFrames(frames: number, rate: Rate): string {
   return `${num}/${den}s`;
 }
 
-function parseTimecodeToFrames(timecode: string, rate: Rate): number {
-  const match = /^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(timecode);
-  if (!match) return 0;
-
-  const [, hh, mm, ss, ff] = match;
-  const hours = Number(hh);
-  const mins = Number(mm);
-  const secs = Number(ss);
-  const frames = Number(ff);
-
-  const fpsInt = Math.round(rate.fpsNum / rate.fpsDen);
-  return (((hours * 60 + mins) * 60 + secs) * fpsInt) + frames;
-}
-
-function xmlEscape(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function pathToFileUrl(path: string): string {
-  if (path.startsWith("file://")) return path;
-  const normalized = path.replaceAll("\\", "/");
-  return `file://${encodeURI(normalized)}`;
-}
-
 export function exportFcpxmlV1(
   keepRanges: KeepRange[],
   source: SourceMediaMetadata,
   options: FcpxmlV1ExportOptions = {},
 ): string {
   const rate = normalizeRate(source.fps);
-  const mediaName = source.name ?? source.path.split("/").pop() ?? "source-media";
+  const mediaName = mediaNameFromSource(source);
   const eventName = options.eventName ?? "prune";
   const projectName = options.projectName ?? "Bit Cut Timeline";
   const sequenceName = options.sequenceName ?? projectName;
 
-  const inferredDurationSec = Math.max(0, ...keepRanges.map((r) => r.sourceEndSec));
+  const filtered = validKeepRanges(keepRanges);
+  const inferredDurationSec = Math.max(0, ...filtered.map((r) => r.sourceEndSec));
   const durationSec = source.durationSec ?? inferredDurationSec;
 
-  const tcStartFrames = parseTimecodeToFrames(source.timecode, rate);
+  const tcStartFrames = parseTimecodeToFrames(source.timecode, Math.round(rate.fpsNum / rate.fpsDen));
   const sequenceTcStart = fromFrames(tcStartFrames, rate);
   const mediaDuration = fromFrames(toFrames(durationSec, rate), rate);
   const frameDuration = `${rate.fpsDen}/${rate.fpsNum}s`;
 
-  const clips = keepRanges
-    .filter((r) => r.sourceEndSec > r.sourceStartSec)
+  const clips = filtered
     .map((r, i) => {
       const sourceStartFrames = toFrames(r.sourceStartSec, rate);
       const sourceEndFrames = toFrames(r.sourceEndSec, rate);

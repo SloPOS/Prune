@@ -71,10 +71,12 @@ async function findTranscriptForMedia(filePath) {
 async function walkMediaFiles(startPath, { recursive = false, limit = 500 } = {}) {
   const files = [];
   const queue = [startPath];
+  let queueIndex = 0;
 
-  while (queue.length > 0) {
-    const current = queue.shift();
+  while (queueIndex < queue.length) {
+    const current = queue[queueIndex++];
     const dirEntries = await fs.readdir(current, { withFileTypes: true });
+    dirEntries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const entry of dirEntries) {
       if (entry.name.startsWith('.')) continue;
@@ -99,8 +101,10 @@ async function walkMediaFiles(startPath, { recursive = false, limit = 500 } = {}
 }
 
 async function buildMediaRecord(rootPath, absoluteFilePath) {
-  const stat = await fs.stat(absoluteFilePath);
-  const transcriptPath = await findTranscriptForMedia(absoluteFilePath);
+  const [stat, transcriptPath] = await Promise.all([
+    fs.stat(absoluteFilePath),
+    findTranscriptForMedia(absoluteFilePath),
+  ]);
 
   return {
     name: path.basename(absoluteFilePath),

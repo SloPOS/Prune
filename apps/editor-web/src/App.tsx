@@ -135,9 +135,36 @@ function normalizeText(input: string): string {
   return input.toLowerCase().replace(/[’]/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
 }
 
+function normalizeWordTokens(tokens: WordToken[]): Array<{ id: string; normalized: string }> {
+  return tokens
+    .map((token) => ({ id: token.id, normalized: normalizeText(token.text) }))
+    .filter((token) => token.normalized.length > 0);
+}
+
+function findMatchingTokenIds(
+  normalizedTokens: Array<{ id: string; normalized: string }>,
+  phraseParts: string[],
+): string[] {
+  if (phraseParts.length === 0 || normalizedTokens.length < phraseParts.length) return [];
+
+  const ids: string[] = [];
+  for (let i = 0; i <= normalizedTokens.length - phraseParts.length; i += 1) {
+    let isMatch = true;
+    for (let j = 0; j < phraseParts.length; j += 1) {
+      if (normalizedTokens[i + j]!.normalized !== phraseParts[j]) {
+        isMatch = false;
+        break;
+      }
+    }
+    if (isMatch) {
+      for (let j = 0; j < phraseParts.length; j += 1) ids.push(normalizedTokens[i + j]!.id);
+    }
+  }
+  return ids;
+}
+
 function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
-  if (tokens.length === 0) return [];
-  const normalizedTokens = tokens.map((token) => ({ token, normalized: normalizeText(token.text) })).filter((t) => t.normalized.length > 0);
+  const normalizedTokens = normalizeWordTokens(tokens);
   if (normalizedTokens.length === 0) return [];
 
   const fixedPhrases = FIXED_SMART_CLEANUP_PHRASES.map((phrase) => {
@@ -147,19 +174,7 @@ function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
 
   const results: PhraseMatch[] = [];
   for (const entry of fixedPhrases) {
-    const tokenIds: string[] = [];
-    for (let i = 0; i <= normalizedTokens.length - entry.phraseParts.length; i += 1) {
-      let isMatch = true;
-      for (let j = 0; j < entry.phraseParts.length; j += 1) {
-        if (normalizedTokens[i + j]!.normalized !== entry.phraseParts[j]) {
-          isMatch = false;
-          break;
-        }
-      }
-      if (isMatch) {
-        for (let j = 0; j < entry.phraseParts.length; j += 1) tokenIds.push(normalizedTokens[i + j]!.token.id);
-      }
-    }
+    const tokenIds = findMatchingTokenIds(normalizedTokens, entry.phraseParts);
     const count = tokenIds.length / entry.phraseParts.length;
     if (count > 0) results.push({ phrase: entry.phrase, normalizedPhrase: entry.normalizedPhrase, tokenIds, count });
   }
@@ -168,23 +183,9 @@ function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
 }
 
 function findPhraseTokenIds(tokens: WordToken[], phrase: string): string[] {
-  const normalizedPhrase = normalizeText(phrase);
-  const parts = normalizedPhrase.split(" ").filter(Boolean);
-  if (parts.length === 0) return [];
-
-  const normalizedTokens = tokens.map((token) => ({ token, normalized: normalizeText(token.text) })).filter((t) => t.normalized.length > 0);
-  const ids: string[] = [];
-  for (let i = 0; i <= normalizedTokens.length - parts.length; i += 1) {
-    let ok = true;
-    for (let j = 0; j < parts.length; j += 1) {
-      if (normalizedTokens[i + j]!.normalized !== parts[j]) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) for (let j = 0; j < parts.length; j += 1) ids.push(normalizedTokens[i + j]!.token.id);
-  }
-  return ids;
+  const parts = normalizeText(phrase).split(" ").filter(Boolean);
+  const normalizedTokens = normalizeWordTokens(tokens);
+  return findMatchingTokenIds(normalizedTokens, parts);
 }
 
 async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {

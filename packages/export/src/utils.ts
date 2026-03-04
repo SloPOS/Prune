@@ -16,6 +16,15 @@ export function pathToFileUrl(path: string): string {
 
 const DEFAULT_FPS = 30;
 
+function normalizeNonNegativeInt(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.round(value));
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
 export function fpsToInt(fps: number): number {
   if (!Number.isFinite(fps) || fps <= 0) {
     return DEFAULT_FPS;
@@ -24,7 +33,7 @@ export function fpsToInt(fps: number): number {
 }
 
 function secondsToFramesWithFpsInt(sec: number, fpsInt: number): number {
-  return Math.max(0, Math.round(sec * fpsInt));
+  return normalizeNonNegativeInt(sec * fpsInt);
 }
 
 export function secondsToFrames(sec: number, fps: number): number {
@@ -32,13 +41,12 @@ export function secondsToFrames(sec: number, fps: number): number {
 }
 
 function frameCountToNdfTimecode(totalFrames: number, fpsInt: number): string {
-  const frames = Math.max(0, Math.round(totalFrames));
+  const frames = normalizeNonNegativeInt(totalFrames);
   const hh = Math.floor(frames / (fpsInt * 3600));
   const mm = Math.floor((frames % (fpsInt * 3600)) / (fpsInt * 60));
   const ss = Math.floor((frames % (fpsInt * 60)) / fpsInt);
   const ff = frames % fpsInt;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(ff)}`;
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}:${pad2(ff)}`;
 }
 
 function frameCountToDfTimecode(totalFrames: number, fpsInt: number): string {
@@ -48,7 +56,7 @@ function frameCountToDfTimecode(totalFrames: number, fpsInt: number): string {
   const framesPer10Minutes = (fpsInt * 60 * 10) - (dropFrames * 9);
   const framesPerMinute = (fpsInt * 60) - dropFrames;
 
-  let frameNumber = Math.max(0, Math.round(totalFrames)) % framesPer24Hours;
+  let frameNumber = normalizeNonNegativeInt(totalFrames) % framesPer24Hours;
   const d = Math.floor(frameNumber / framesPer10Minutes);
   const m = frameNumber % framesPer10Minutes;
 
@@ -62,9 +70,8 @@ function frameCountToDfTimecode(totalFrames: number, fpsInt: number): string {
   const mm = Math.floor((frameNumber % framesPerHour) / (fpsInt * 60));
   const ss = Math.floor((frameNumber % (fpsInt * 60)) / fpsInt);
   const ff = frameNumber % fpsInt;
-  const pad = (n: number) => String(n).padStart(2, "0");
 
-  return `${pad(hh)}:${pad(mm)}:${pad(ss)};${pad(ff)}`;
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)};${pad2(ff)}`;
 }
 
 export function framesToTimecode(totalFrames: number, fps: number, options: { dropFrame?: boolean } = {}): string {
@@ -109,7 +116,7 @@ export function createTimecodeFormatter(
   const cache = createBoundedCache<number, string>(maxCacheEntries);
 
   return (totalFrames: number): string => {
-    const normalizedFrames = Math.max(0, Math.round(totalFrames));
+    const normalizedFrames = normalizeNonNegativeInt(totalFrames);
     const cached = cache.get(normalizedFrames);
     if (cached) return cached;
 
@@ -132,6 +139,10 @@ export function parseTimecodeToFrames(timecode: string, fpsInt: number): number 
   const minutes = Number(mm);
   const seconds = Number(ss);
   const frames = Number(ff);
+
+  if (minutes >= 60 || seconds >= 60 || frames >= effectiveFps) {
+    return 0;
+  }
 
   const totalSeconds = ((hours * 60 + minutes) * 60) + seconds;
   const totalFrames = (totalSeconds * effectiveFps) + frames;

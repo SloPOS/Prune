@@ -20,7 +20,7 @@ type RootConfig = { id: string; name: string; path: string };
 type SelectedMedia = { root: RootName; path: string; name: string } | null;
 type TranscriptSource = { root: RootName; path: string } | null;
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
 
 type TranscribeState = {

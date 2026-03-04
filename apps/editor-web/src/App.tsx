@@ -319,6 +319,9 @@ export function App() {
   const [showTranscriptSearchModal, setShowTranscriptSearchModal] = useState(false);
   const [rangeSelectMode, setRangeSelectMode] = useState(false);
   const [rangeSelectAnchor, setRangeSelectAnchor] = useState<number | null>(null);
+  const [wordEditMode, setWordEditMode] = useState(false);
+  const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
+  const [editingTokenDraft, setEditingTokenDraft] = useState("");
   const [gapShortenerEnabled, setGapShortenerEnabled] = useState(false);
   const [gapMinThresholdSec, setGapMinThresholdSec] = useState(0.8);
   const [gapLeaveBehindSec, setGapLeaveBehindSec] = useState(0.12);
@@ -520,6 +523,13 @@ export function App() {
   }, [transcribe.status, transcribe.jobId, transcribe.transcriptRelPath, transcriptPickerRoot, lastAutoLoadedTranscriptJobId, isMobileLayout]);
 
   useEffect(() => { setActiveTokenIndex(tokenAtTime(tokens, currentTimeSec)); }, [tokens, currentTimeSec]);
+
+  useEffect(() => {
+    if (!wordEditMode) {
+      setEditingTokenId(null);
+      setEditingTokenDraft("");
+    }
+  }, [wordEditMode]);
   useEffect(() => {
     if (videoRef.current) videoRef.current.currentTime = 0;
     if (audioRef.current) audioRef.current.currentTime = 0;
@@ -832,6 +842,8 @@ export function App() {
     setTokens(nextTokens);
     setTranscriptSource({ root, path: relPath });
     setDeleted(new Set());
+    setEditingTokenId(null);
+    setEditingTokenDraft("");
     setIgnoredPhrases(new Set());
     setHighlightedPhrase(null);
     setAppliedGapCuts([]);
@@ -946,6 +958,8 @@ export function App() {
     setTranscriptSource(null);
     setDeleted(new Set());
     setAppliedGapCuts([]);
+    setEditingTokenId(null);
+    setEditingTokenDraft("");
     setIgnoredPhrases(new Set());
     setHighlightedPhrase(null);
     setSearchPhrase("");
@@ -1533,6 +1547,27 @@ export function App() {
     });
   }
 
+  function beginWordEdit(token: WordToken) {
+    if (!wordEditMode) return;
+    setEditingTokenId(token.id);
+    setEditingTokenDraft(token.text);
+  }
+
+  function cancelWordEdit() {
+    setEditingTokenId(null);
+    setEditingTokenDraft("");
+  }
+
+  function commitWordEdit(tokenId: string) {
+    const nextText = editingTokenDraft.trim();
+    if (!nextText) {
+      cancelWordEdit();
+      return;
+    }
+    setTokens((prev) => prev.map((token) => (token.id === tokenId ? { ...token, text: nextText } : token)));
+    cancelWordEdit();
+  }
+
   function toggleRangeByIndex(a: number, b: number) {
     const start = Math.max(0, Math.min(a, b));
     const end = Math.min(tokens.length - 1, Math.max(a, b));
@@ -1993,11 +2028,12 @@ export function App() {
           </div>
           <div className="row" style={{ marginBottom: 0 }}>
             <button onClick={() => setShowTranscriptSearchModal(true)}>Search</button>
-            <button title="Toggle range select mode" className={rangeSelectMode ? "active" : ""} onClick={() => { setRangeSelectMode((v) => !v); setRangeSelectAnchor(null); }}>Range</button>
+            <button title="Toggle range select mode" className={rangeSelectMode ? "active" : ""} onClick={() => { setRangeSelectMode((v) => !v); setRangeSelectAnchor(null); setWordEditMode(false); }}>Range</button>
+            <button title="Toggle word edit mode (text only, no timing changes)" className={wordEditMode ? "active" : ""} onClick={() => { setWordEditMode((v) => !v); setRangeSelectMode(false); setRangeSelectAnchor(null); }}>Edit</button>
             <button title="Undo last transcript removal action" onClick={() => undoLastDeleteAction()} disabled={undoStack.length === 0}>Undo</button>
           </div>
         </div>
-        {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. Double-click a word to play from it.</div>}
+        {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. Tap Edit to correct individual words without changing timing. Double-click a word to play from it.</div>}
 
         {tokens.length === 0 ? (
           <div className="transcriptParagraph" style={{ display: "grid", placeItems: "center", textAlign: "center" }}>
@@ -2013,7 +2049,30 @@ export function App() {
           <p className="transcriptParagraph">
             {tokens.map((t, index) => {
               const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
-              return <span key={t.id}><button data-token-index={index} onMouseDown={() => beginTokenDrag(index)} onMouseEnter={() => continueTokenDrag(index)} onMouseUp={() => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => playFromToken(t)} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
+              if (wordEditMode && editingTokenId === t.id) {
+                return (
+                  <span key={t.id}>
+                    <input
+                      className="tokenInlineEditor"
+                      value={editingTokenDraft}
+                      autoFocus
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setEditingTokenDraft(e.target.value)}
+                      onBlur={() => commitWordEdit(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitWordEdit(t.id);
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancelWordEdit();
+                        }
+                      }}
+                    />{" "}
+                  </span>
+                );
+              }
+              return <span key={t.id}><button data-token-index={index} onMouseDown={wordEditMode ? undefined : () => beginTokenDrag(index)} onMouseEnter={wordEditMode ? undefined : () => continueTokenDrag(index)} onMouseUp={wordEditMode ? undefined : () => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (wordEditMode) { beginWordEdit(t); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => { if (!wordEditMode) playFromToken(t); }} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
             })}
           </p>
         )}

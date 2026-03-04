@@ -476,6 +476,16 @@ select {
   background: rgba(110, 168, 254, 0.32);
 }
 
+.tokenInlineEditor {
+  font: inherit;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--line) 70%, #6ea8fe 30%);
+  background: color-mix(in srgb, var(--panel) 90%, #6ea8fe 10%);
+  border-radius: 6px;
+  padding: 1px 6px;
+  min-width: 56px;
+}
+
 .cleanupPanel {
   border: 1px solid var(--line);
   background: #1a211d;

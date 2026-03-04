@@ -9,114 +9,30 @@ import { useScopedMobileModalTab } from "./hooks/useScopedMobileModalTab";
 import { useExportPolling, useTranscribePolling } from "./hooks/useJobPolling";
 import { useRenderStatusPolling } from "./hooks/useRenderStatusPolling";
 import { useMobileFullscreenGuard } from "./hooks/useMobileFullscreenGuard";
-
-type RootName = string;
-type BrowserEntry = {
-  name: string;
-  type: "dir" | "file";
-  relPath: string;
-  sizeBytes: number | null;
-};
-
-type RootConfig = { id: string; name: string; path: string };
-type SelectedMedia = { root: RootName; path: string; name: string } | null;
-type TranscriptSource = { root: RootName; path: string } | null;
-type UiTab = "media" | "transcript" | "tools" | "render";
-type OptionalUiTab = UiTab | null;
-type RenderSection = "video" | "editor" | "subs" | "script";
-type DesktopRenderSection = "video" | "project" | "subs";
-type ModalDragKey = "export" | "render" | "progress" | "settings" | "about" | "dirPicker" | "filePicker" | "transcribe" | "transcriptPrompt" | "search" | "loadProject" | "confirmDelete" | "projectName";
-
-const APP_VERSION = "1.0.1";
-type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
-
-type TranscribeState = {
-  jobId: string | null;
-  status: "idle" | "starting" | "running" | "done" | "error";
-  log: string[];
-  transcriptRelPath: string | null;
-  error: string | null;
-  startedAt?: number;
-  mediaDurationSec?: number;
-  transcribedSec?: number;
-  phase?: "queued" | "extracting" | "transcribing" | "finalizing" | "done" | "error";
-  percent?: number | null;
-  etaSec?: number | null;
-  speedLabel?: string | null;
-};
-
-type ExportState = {
-  jobId: string | null;
-  status: "idle" | "starting" | "running" | "done" | "error";
-  outputPath: string | null;
-  error: string | null;
-  log: string[];
-};
-
-type GlobalRenderStatus = {
-  jobId: string | null;
-  status: "idle" | "running" | "done" | "error";
-  outputPath?: string;
-  outputName?: string;
-  expectedDurationSec?: number;
-  progressSec?: number;
-  percent?: number | null;
-  etaSec?: number | null;
-  error?: string;
-  lastLog?: string;
-};
-
-type ScriptExportState = {
-  status: "idle" | "working" | "done" | "error";
-  outputPath: string | null;
-  error: string | null;
-};
-
-type SubtitleExportState = {
-  status: "idle" | "working" | "done" | "error";
-  outputPath: string | null;
-  error: string | null;
-  format: "srt" | "vtt" | null;
-};
-
-
-type AnalysisCandidate = {
-  id: string;
-  kind: "breath" | "noise_click";
-  startSec: number;
-  endSec: number;
-  confidence: "low" | "medium" | "high";
-  score: number;
-  reason: string;
-};
-
-type GalleryItem = {
-  id: string;
-  root: RootName;
-  relPath: string;
-  name: string;
-  kind: "original" | "export";
-  sizeBytes: number;
-  modifiedAt: string;
-  durationSec: number | null;
-  isVideo: boolean;
-  isAudio: boolean;
-  mediaUrl: string;
-  thumbUrl?: string | null;
-};
-
-type GapSuggestion = {
-  id: string;
-  startSec: number;
-  endSec: number;
-  gapSec: number;
-  trimStartSec: number;
-  trimEndSec: number;
-  trimSec: number;
-};
-
-const EXPORT_JOB_STORAGE_KEY = "prune-export-job";
-const FUN_MODE_STORAGE_KEY = "prune-fun-mode";
+import {
+  APP_VERSION,
+  EXPORT_JOB_STORAGE_KEY,
+  FUN_MODE_STORAGE_KEY,
+  type AnalysisCandidate,
+  type BrowserEntry,
+  type DesktopRenderSection,
+  type ExportState,
+  type GalleryItem,
+  type GapSuggestion,
+  type GlobalRenderStatus,
+  type ModalDragKey,
+  type OptionalUiTab,
+  type RenderSection,
+  type RootConfig,
+  type RootName,
+  type ScriptExportState,
+  type SelectedMedia,
+  type SubtitleExportState,
+  type TranscriptSource,
+  type TranscribeState,
+  type TreeSelection,
+  type UiTab,
+} from "./types/app";
 
 async function fetchDir(root: RootName, relDir: string): Promise<{ relDir: string; entries: BrowserEntry[] }> {
   const query = new URLSearchParams({ root, dir: relDir }).toString();

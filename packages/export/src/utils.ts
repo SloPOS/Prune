@@ -75,6 +75,27 @@ export function framesToTimecode(totalFrames: number, fps: number, options: { dr
   return frameCountToNdfTimecode(totalFrames, fpsInt);
 }
 
+function createBoundedCache<K, V>(maxEntries: number): {
+  get: (key: K) => V | undefined;
+  set: (key: K, value: V) => void;
+} {
+  const cache = new Map<K, V>();
+
+  return {
+    get: (key: K) => cache.get(key),
+    set: (key: K, value: V) => {
+      if (maxEntries <= 0) return;
+      if (cache.has(key)) {
+        cache.delete(key);
+      } else if (cache.size >= maxEntries) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey !== undefined) cache.delete(oldestKey);
+      }
+      cache.set(key, value);
+    },
+  };
+}
+
 export function createTimecodeFormatter(
   fps: number,
   options: { dropFrame?: boolean; maxCacheEntries?: number } = {},
@@ -85,7 +106,7 @@ export function createTimecodeFormatter(
   const maxCacheEntries = typeof requestedMaxCacheEntries === "number" && Number.isFinite(requestedMaxCacheEntries)
     ? Math.max(0, Math.floor(requestedMaxCacheEntries))
     : 5000;
-  const cache = new Map<number, string>();
+  const cache = createBoundedCache<number, string>(maxCacheEntries);
 
   return (totalFrames: number): string => {
     const normalizedFrames = Math.max(0, Math.round(totalFrames));
@@ -96,10 +117,7 @@ export function createTimecodeFormatter(
       ? frameCountToDfTimecode(normalizedFrames, fpsInt)
       : frameCountToNdfTimecode(normalizedFrames, fpsInt);
 
-    if (maxCacheEntries > 0) {
-      if (cache.size >= maxCacheEntries) cache.clear();
-      cache.set(normalizedFrames, timecode);
-    }
+    cache.set(normalizedFrames, timecode);
     return timecode;
   };
 }

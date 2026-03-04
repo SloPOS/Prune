@@ -54,22 +54,15 @@ function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: n
   const index = new Map<string, string[]>();
 
   for (let start = 0; start < normalizedTokens.length; start += 1) {
-    const phraseParts: string[] = [];
+    let key = "";
     for (let size = 1; size <= maxPhraseLength && start + size <= normalizedTokens.length; size += 1) {
       const token = normalizedTokens[start + size - 1];
       if (!token) break;
 
-      phraseParts.push(token.normalized);
-      const key = phraseParts.join(" ");
-      const ids = index.get(key);
-
-      if (ids) {
-        for (let offset = 0; offset < size; offset += 1) ids.push(normalizedTokens[start + offset]!.id);
-      } else {
-        const nextIds: string[] = [];
-        for (let offset = 0; offset < size; offset += 1) nextIds.push(normalizedTokens[start + offset]!.id);
-        index.set(key, nextIds);
-      }
+      key = size === 1 ? token.normalized : `${key} ${token.normalized}`;
+      const target = index.get(key) ?? [];
+      for (let offset = 0; offset < size; offset += 1) target.push(normalizedTokens[start + offset]!.id);
+      if (!index.has(key)) index.set(key, target);
     }
   }
 

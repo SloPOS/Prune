@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { framesToTimecode, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, mediaNameFromSource } from "./utils.js";
+import { createTimecodeFormatter, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, mediaNameFromSource } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -22,6 +22,7 @@ export function exportEdlCmx3600(
   const fps = source.fps;
   const frameRanges = keepRangesToFrameRanges(keepRanges, fps);
   const dropFrame = inferTimecodeFormat(source.timecode).dropFrame && isNtscFrameRate(source.fps);
+  const formatTimecode = createTimecodeFormatter(fps, { dropFrame });
 
   const lines: string[] = [];
   lines.push(`TITLE: ${title}`);
@@ -31,7 +32,7 @@ export function exportEdlCmx3600(
   frameRanges.forEach((r, i) => {
     const event = String(i + 1).padStart(3, "0");
     lines.push(
-      `${event}  ${reel.padEnd(8, " ")} V     C        ${framesToTimecode(r.inFrames, fps, { dropFrame })} ${framesToTimecode(r.outFrames, fps, { dropFrame })} ${framesToTimecode(r.startFrames, fps, { dropFrame })} ${framesToTimecode(r.endFrames, fps, { dropFrame })}`,
+      `${event}  ${reel.padEnd(8, " ")} V     C        ${formatTimecode(r.inFrames)} ${formatTimecode(r.outFrames)} ${formatTimecode(r.startFrames)} ${formatTimecode(r.endFrames)}`,
     );
     lines.push(`* FROM CLIP NAME: ${clipName}`);
   });

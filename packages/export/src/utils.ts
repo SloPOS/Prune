@@ -75,6 +75,25 @@ export function framesToTimecode(totalFrames: number, fps: number, options: { dr
   return frameCountToNdfTimecode(totalFrames, fpsInt);
 }
 
+export function createTimecodeFormatter(fps: number, options: { dropFrame?: boolean } = {}): (totalFrames: number) => string {
+  const fpsInt = fpsToInt(fps);
+  const useDropFrame = Boolean(options.dropFrame && (fpsInt === 30 || fpsInt === 60));
+  const cache = new Map<number, string>();
+
+  return (totalFrames: number): string => {
+    const normalizedFrames = Math.max(0, Math.round(totalFrames));
+    const cached = cache.get(normalizedFrames);
+    if (cached) return cached;
+
+    const timecode = useDropFrame
+      ? frameCountToDfTimecode(normalizedFrames, fpsInt)
+      : frameCountToNdfTimecode(normalizedFrames, fpsInt);
+
+    cache.set(normalizedFrames, timecode);
+    return timecode;
+  };
+}
+
 export function parseTimecodeToFrames(timecode: string, fpsInt: number): number {
   const match = /^(\d{2}):(\d{2}):(\d{2})([:;])(\d{2})$/.exec(timecode);
   if (!match) return 0;

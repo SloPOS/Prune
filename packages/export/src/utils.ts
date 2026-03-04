@@ -23,8 +23,12 @@ export function fpsToInt(fps: number): number {
   return Math.max(1, Math.round(fps));
 }
 
+function secondsToFramesWithFpsInt(sec: number, fpsInt: number): number {
+  return Math.max(0, Math.round(sec * fpsInt));
+}
+
 export function secondsToFrames(sec: number, fps: number): number {
-  return Math.max(0, Math.round(sec * fpsToInt(fps)));
+  return secondsToFramesWithFpsInt(sec, fpsToInt(fps));
 }
 
 export function framesToTimecode(totalFrames: number, fps: number): string {
@@ -49,15 +53,17 @@ export function parseTimecodeToFrames(timecode: string, fpsInt: number): number 
   const seconds = Number(ss);
   const frames = Number(ff);
 
+  const totalSeconds = ((hours * 60 + minutes) * 60) + seconds;
+  const totalFrames = (totalSeconds * effectiveFps) + frames;
+
   if (separator === ";" && (effectiveFps === 30 || effectiveFps === 60)) {
     const dropFrames = effectiveFps === 30 ? 2 : 4;
     const totalMinutes = (hours * 60) + minutes;
     const droppedFrames = dropFrames * (totalMinutes - Math.floor(totalMinutes / 10));
-    const totalFrames = (((hours * 60 + minutes) * 60 + seconds) * effectiveFps) + frames;
     return Math.max(0, totalFrames - droppedFrames);
   }
 
-  return (((hours * 60 + minutes) * 60 + seconds) * effectiveFps) + frames;
+  return totalFrames;
 }
 
 export function mediaNameFromSource(source: SourceMediaMetadata, fallback = "source-media"): string {
@@ -152,10 +158,12 @@ export function keepRangesToFrameRanges(
   options: { alreadyNormalized?: boolean } = {},
 ): FrameKeepRange[] {
   const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
+  const fpsInt = fpsToInt(fps);
+
   return ranges.map((range) => {
-    const inFrames = secondsToFrames(range.sourceStartSec, fps);
-    const outFrames = secondsToFrames(range.sourceEndSec, fps);
-    const startFrames = secondsToFrames(range.outputStartSec, fps);
+    const inFrames = secondsToFramesWithFpsInt(range.sourceStartSec, fpsInt);
+    const outFrames = secondsToFramesWithFpsInt(range.sourceEndSec, fpsInt);
+    const startFrames = secondsToFramesWithFpsInt(range.outputStartSec, fpsInt);
     const endFrames = startFrames + Math.max(0, outFrames - inFrames);
     return { inFrames, outFrames, startFrames, endFrames };
   });

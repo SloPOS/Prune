@@ -137,6 +137,26 @@ async function buildMediaRecord(rootPath, absoluteFilePath, { includeAbsolutePat
   };
 }
 
+async function mapWithConcurrency(items, limit, mapFn) {
+  if (items.length === 0) return [];
+
+  const concurrency = Math.max(1, Math.min(limit, items.length));
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await mapFn(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return results;
+}
+
 async function handleListMedia(req, res, url) {
   const rootKey = url.searchParams.get('root') || 'inbox';
   const relativeDir = normalizeRelativeDir(url.searchParams.get('dir') || '');
@@ -146,6 +166,11 @@ async function handleListMedia(req, res, url) {
     fallback: 200,
     min: 1,
     max: 2000,
+  });
+  const metadataConcurrency = parseBoundedInt(url.searchParams.get('metadataConcurrency') || 24, {
+    fallback: 24,
+    min: 1,
+    max: 64,
   });
 
   const rootPath = ALLOWED_ROOTS[rootKey];
@@ -161,8 +186,10 @@ async function handleListMedia(req, res, url) {
     }
 
     const mediaFiles = await walkMediaFiles(targetDir, { recursive, limit });
-    const items = await Promise.all(
-      mediaFiles.map((f) => buildMediaRecord(rootPath, f, { includeAbsolutePaths })),
+    const items = await mapWithConcurrency(
+      mediaFiles,
+      metadataConcurrency,
+      (filePath) => buildMediaRecord(rootPath, filePath, { includeAbsolutePaths }),
     );
 
     return sendJson(res, 200, {
@@ -172,6 +199,7 @@ async function handleListMedia(req, res, url) {
       recursive,
       includeAbsolutePaths,
       limit,
+      metadataConcurrency,
       count: items.length,
       items,
     });

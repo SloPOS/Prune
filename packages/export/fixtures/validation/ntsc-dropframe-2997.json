@@ -1,0 +1,45 @@
+{
+  "name": "ntsc-2997-dropframe-timecode",
+  "source": {
+    "path": "/media/dropframe-source.mov",
+    "name": "Dropframe Source.mov",
+    "fps": 29.97,
+    "timecode": "01:00:00;00",
+    "durationSec": 20
+  },
+  "keepRanges": [
+    { "sourceStartSec": 5, "sourceEndSec": 6, "outputStartSec": 0 },
+    { "sourceStartSec": 7.5, "sourceEndSec": 8.25, "outputStartSec": 1 }
+  ],
+  "expect": {
+    "fcpxml": {
+      "frameDuration": "1001/30000s",
+      "sequenceTcStart": "107999892/30000s",
+      "clips": [
+        { "offset": "0/30000s", "start": "108150042/30000s", "duration": "30030/30000s" },
+        { "offset": "30030/30000s", "start": "108225117/30000s", "duration": "22022/30000s" }
+      ]
+    },
+    "edl": {
+      "title": "NTSC_2997_DROPFRAME_TIMECODE",
+      "events": [
+        { "srcIn": "00:00:05:00", "srcOut": "00:00:06:00", "recIn": "00:00:00:00", "recOut": "00:00:01:00" },
+        { "srcIn": "00:00:07:15", "srcOut": "00:00:08:08", "recIn": "00:00:01:00", "recOut": "00:00:01:23" }
+      ]
+    },
+    "premiere": {
+      "sequenceDuration": 53,
+      "timebase": 30,
+      "tcFrame": 107892,
+      "clips": [
+        { "start": 0, "end": 30, "in": 150, "out": 180 },
+        { "start": 30, "end": 53, "in": 225, "out": 248 }
+      ]
+    },
+    "aafBridge": {
+      "fps": 29.97,
+      "keepRangesCount": 2,
+      "firstKeepRange": { "sourceStartSec": 5, "sourceEndSec": 6, "outputStartSec": 0 }
+    }
+  }
+}

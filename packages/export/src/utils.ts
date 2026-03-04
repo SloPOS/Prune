@@ -39,12 +39,25 @@ export function framesToTimecode(totalFrames: number, fps: number): string {
 }
 
 export function parseTimecodeToFrames(timecode: string, fpsInt: number): number {
-  const match = /^(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(timecode);
+  const match = /^(\d{2}):(\d{2}):(\d{2})([:;])(\d{2})$/.exec(timecode);
   if (!match) return 0;
 
   const effectiveFps = fpsToInt(fpsInt);
-  const [, hh, mm, ss, ff] = match;
-  return (((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * effectiveFps) + Number(ff);
+  const [, hh, mm, ss, separator, ff] = match;
+  const hours = Number(hh);
+  const minutes = Number(mm);
+  const seconds = Number(ss);
+  const frames = Number(ff);
+
+  if (separator === ";" && (effectiveFps === 30 || effectiveFps === 60)) {
+    const dropFrames = effectiveFps === 30 ? 2 : 4;
+    const totalMinutes = (hours * 60) + minutes;
+    const droppedFrames = dropFrames * (totalMinutes - Math.floor(totalMinutes / 10));
+    const totalFrames = (((hours * 60 + minutes) * 60 + seconds) * effectiveFps) + frames;
+    return Math.max(0, totalFrames - droppedFrames);
+  }
+
+  return (((hours * 60 + minutes) * 60 + seconds) * effectiveFps) + frames;
 }
 
 export function mediaNameFromSource(source: SourceMediaMetadata, fallback = "source-media"): string {

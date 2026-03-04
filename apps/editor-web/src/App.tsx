@@ -3,6 +3,7 @@ import { cutRangesFromDeletedTokens, keepRangesFromCuts, type TimeRange, type Wo
 import pruneLogo from "./assets/prune-logo.jpg";
 import { formatBytes, formatDurationShort, formatEta } from "./utils/appRuntime";
 import { buildScriptBody, isAudioFile, isVideoFile, mergeTimeRanges, normalizeTokens as normalizeTranscript, sanitizeBaseName, tokenAtTime } from "./utils/appMedia";
+import { parseFunModeState, stringifyFunModeState, type FunSequenceItem } from "./utils/funMode";
 import { buildPhraseMatches, findPhraseTokenIds, type PhraseMatch } from "./utils/phraseMatcher";
 import { useScopedMobileModalTab } from "./hooks/useScopedMobileModalTab";
 import { useExportPolling, useTranscribePolling } from "./hooks/useJobPolling";
@@ -107,11 +108,6 @@ type GapSuggestion = {
   trimStartSec: number;
   trimEndSec: number;
   trimSec: number;
-};
-
-type FunSequenceItem = {
-  id: string;
-  tokenId: string;
 };
 
 const EXPORT_JOB_STORAGE_KEY = "prune-export-job";
@@ -326,11 +322,11 @@ export function App() {
     const savedFunMode = window.localStorage.getItem(FUN_MODE_STORAGE_KEY);
     if (savedFunMode) {
       try {
-        const parsed = JSON.parse(savedFunMode);
-        setFunModeLocked(Boolean(parsed?.funModeLocked));
-        setFunSequence(Array.isArray(parsed?.funSequence) ? parsed.funSequence : []);
-        setFunFadeInSec(Math.max(0, Number(parsed?.funFadeInSec || 0)));
-        setFunFadeOutSec(Math.max(0, Number(parsed?.funFadeOutSec || 0)));
+        const parsedFunMode = parseFunModeState(JSON.parse(savedFunMode), "persisted");
+        setFunModeLocked(parsedFunMode.funModeLocked);
+        setFunSequence(parsedFunMode.funSequence);
+        setFunFadeInSec(parsedFunMode.funFadeInSec);
+        setFunFadeOutSec(parsedFunMode.funFadeOutSec);
       } catch {}
     }
   }, []);
@@ -342,13 +338,15 @@ export function App() {
 
 
   useEffect(() => {
-    const payload = {
-      funModeLocked,
-      funSequence,
-      funFadeInSec,
-      funFadeOutSec,
-    };
-    window.localStorage.setItem(FUN_MODE_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(
+      FUN_MODE_STORAGE_KEY,
+      stringifyFunModeState({
+        funModeLocked,
+        funSequence,
+        funFadeInSec,
+        funFadeOutSec,
+      }),
+    );
   }, [funModeLocked, funSequence, funFadeInSec, funFadeOutSec]);
 
   useEffect(() => {
@@ -851,13 +849,13 @@ export function App() {
   function applyLoadedProjectData(data: any) {
     const deletedIds = Array.isArray(data.deletedTokenIds) ? data.deletedTokenIds.map((v: unknown) => String(v)) : [];
     const gapCuts = Array.isArray(data.appliedGapCuts) ? data.appliedGapCuts : [];
-    const nextFunSequence = Array.isArray(data.funSequence) ? data.funSequence.map((item: any, idx: number) => ({ id: String(item?.id || `${Date.now()}-${idx}`), tokenId: String(item?.tokenId || "") })).filter((item: FunSequenceItem) => item.tokenId) : [];
+    const normalizedFunMode = parseFunModeState(data, "project");
     setDeleted(new Set(deletedIds));
     setAppliedGapCuts(gapCuts);
-    setFunModeLocked(Boolean(data.funModeLocked));
-    setFunSequence(nextFunSequence);
-    setFunFadeInSec(Math.max(0, Number(data.funFadeInSec || 0)));
-    setFunFadeOutSec(Math.max(0, Number(data.funFadeOutSec || 0)));
+    setFunModeLocked(normalizedFunMode.funModeLocked);
+    setFunSequence(normalizedFunMode.funSequence);
+    setFunFadeInSec(normalizedFunMode.funFadeInSec);
+    setFunFadeOutSec(normalizedFunMode.funFadeOutSec);
     if (typeof data.exportName === "string" && data.exportName.trim()) setExportName(data.exportName);
     setCurrentProjectId(typeof data.projectId === "string" ? data.projectId : null);
     setCurrentProjectName(typeof data.projectName === "string" ? data.projectName : "");

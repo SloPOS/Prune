@@ -19,7 +19,7 @@ const FIXED_SMART_CLEANUP_PHRASES = [
 type NormalizedToken = { id: string; normalized: string };
 type TokenCorpus = {
   normalizedTokens: NormalizedToken[];
-  ngramIndex: Map<string, string[]>;
+  ngramIndex: Map<string, number[]>;
   maxWords: number;
 };
 
@@ -33,6 +33,10 @@ const corpusCache = new WeakMap<WordToken[], TokenCorpus>();
 
 function normalizeText(input: string): string {
   return input.toLowerCase().replace(/[’]/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
+}
+
+function normalizePhraseText(input: string): string {
+  return normalizeText(input).split(" ").filter(Boolean).join(" ");
 }
 
 function normalizedWordCount(value: string): number {
@@ -50,8 +54,8 @@ function normalizeWordTokens(tokens: WordToken[]): NormalizedToken[] {
     .filter((token) => token.normalized.length > 0);
 }
 
-function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: number): Map<string, string[]> {
-  const index = new Map<string, string[]>();
+function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: number): Map<string, number[]> {
+  const index = new Map<string, number[]>();
 
   for (let start = 0; start < normalizedTokens.length; start += 1) {
     let key = "";
@@ -60,9 +64,12 @@ function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: n
       if (!token) break;
 
       key = size === 1 ? token.normalized : `${key} ${token.normalized}`;
-      const target = index.get(key) ?? [];
-      for (let offset = 0; offset < size; offset += 1) target.push(normalizedTokens[start + offset]!.id);
-      if (!index.has(key)) index.set(key, target);
+      const starts = index.get(key);
+      if (starts) {
+        starts.push(start);
+      } else {
+        index.set(key, [start]);
+      }
     }
   }
 
@@ -72,7 +79,7 @@ function buildNgramIndex(normalizedTokens: NormalizedToken[], maxPhraseLength: n
 function preparePhrases(phrases: readonly string[]): PreparedPhrase[] {
   const prepared: PreparedPhrase[] = [];
   for (const phrase of phrases) {
-    const normalizedPhrase = normalizeText(phrase).split(" ").filter(Boolean).join(" ");
+    const normalizedPhrase = normalizePhraseText(phrase);
     if (!normalizedPhrase) continue;
     prepared.push({ phrase, normalizedPhrase, wordCount: normalizedWordCount(normalizedPhrase) });
   }
@@ -93,9 +100,20 @@ function getCorpus(tokens: WordToken[], maxWords = FIXED_PHRASE_MAX_WORDS): Toke
   return corpus;
 }
 
-function findMatchingTokenIds(index: Map<string, string[]>, normalizedPhrase: string): string[] {
-  if (!normalizedPhrase) return [];
-  return index.get(normalizedPhrase) ?? [];
+function findMatchingTokenIds(index: Map<string, number[]>, normalizedTokens: NormalizedToken[], normalizedPhrase: string, phraseWordCount: number): string[] {
+  if (!normalizedPhrase || phraseWordCount <= 0) return [];
+
+  const starts = index.get(normalizedPhrase);
+  if (!starts || starts.length === 0) return [];
+
+  const ids: string[] = [];
+  for (const start of starts) {
+    for (let offset = 0; offset < phraseWordCount; offset += 1) {
+      const token = normalizedTokens[start + offset];
+      if (token) ids.push(token.id);
+    }
+  }
+  return ids;
 }
 
 export function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
@@ -104,7 +122,7 @@ export function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
 
   const results: PhraseMatch[] = [];
   for (const phrase of FIXED_PREPARED_PHRASES) {
-    const tokenIds = findMatchingTokenIds(ngramIndex, phrase.normalizedPhrase);
+    const tokenIds = findMatchingTokenIds(ngramIndex, normalizedTokens, phrase.normalizedPhrase, phrase.wordCount);
     if (tokenIds.length === 0) continue;
 
     const count = tokenIds.length / phrase.wordCount;
@@ -122,10 +140,10 @@ export function buildPhraseMatches(tokens: WordToken[]): PhraseMatch[] {
 }
 
 export function findPhraseTokenIds(tokens: WordToken[], phrase: string): string[] {
-  const normalizedPhrase = normalizeText(phrase).split(" ").filter(Boolean).join(" ");
+  const normalizedPhrase = normalizePhraseText(phrase);
   if (!normalizedPhrase) return [];
 
   const phraseWordCount = normalizedWordCount(normalizedPhrase);
-  const { ngramIndex } = getCorpus(tokens, Math.max(FIXED_PHRASE_MAX_WORDS, phraseWordCount));
-  return findMatchingTokenIds(ngramIndex, normalizedPhrase);
+  const { normalizedTokens, ngramIndex } = getCorpus(tokens, Math.max(FIXED_PHRASE_MAX_WORDS, phraseWordCount));
+  return findMatchingTokenIds(ngramIndex, normalizedTokens, normalizedPhrase, phraseWordCount);
 }

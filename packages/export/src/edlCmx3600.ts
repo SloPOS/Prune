@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { framesToTimecode, keepRangesToFrameRanges, mediaNameFromSource } from "./utils.js";
+import { framesToTimecode, inferTimecodeFormat, isNtscFrameRate, keepRangesToFrameRanges, mediaNameFromSource } from "./utils.js";
 
 export interface EdlExportOptions {
   title?: string;
@@ -21,16 +21,17 @@ export function exportEdlCmx3600(
   const reel = cleanReel(options.reel || source.name || source.path.split("/").pop() || "AX");
   const fps = source.fps;
   const frameRanges = keepRangesToFrameRanges(keepRanges, fps);
+  const dropFrame = inferTimecodeFormat(source.timecode).dropFrame && isNtscFrameRate(source.fps);
 
   const lines: string[] = [];
   lines.push(`TITLE: ${title}`);
-  lines.push("FCM: NON-DROP FRAME");
+  lines.push(dropFrame ? "FCM: DROP FRAME" : "FCM: NON-DROP FRAME");
   lines.push("");
 
   frameRanges.forEach((r, i) => {
     const event = String(i + 1).padStart(3, "0");
     lines.push(
-      `${event}  ${reel.padEnd(8, " ")} V     C        ${framesToTimecode(r.inFrames, fps)} ${framesToTimecode(r.outFrames, fps)} ${framesToTimecode(r.startFrames, fps)} ${framesToTimecode(r.endFrames, fps)}`,
+      `${event}  ${reel.padEnd(8, " ")} V     C        ${framesToTimecode(r.inFrames, fps, { dropFrame })} ${framesToTimecode(r.outFrames, fps, { dropFrame })} ${framesToTimecode(r.startFrames, fps, { dropFrame })} ${framesToTimecode(r.endFrames, fps, { dropFrame })}`,
     );
     lines.push(`* FROM CLIP NAME: ${clipName}`);
   });

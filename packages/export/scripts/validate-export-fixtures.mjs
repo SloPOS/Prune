@@ -34,7 +34,7 @@ function parseEdl(edl) {
   const title = lines.find((l) => l.startsWith("TITLE:"))?.replace("TITLE:", "").trim() ?? "";
   const eventLines = lines.filter((l) => /^\d{3}\s+/.test(l));
   const events = eventLines.map((line) => {
-    const tc = line.match(/(\d\d:\d\d:\d\d:\d\d)/g) || [];
+    const tc = line.match(/(\d\d:\d\d:\d\d[:;]\d\d)/g) || [];
     return {
       srcIn: tc[0],
       srcOut: tc[1],

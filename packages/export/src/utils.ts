@@ -31,8 +31,7 @@ export function secondsToFrames(sec: number, fps: number): number {
   return secondsToFramesWithFpsInt(sec, fpsToInt(fps));
 }
 
-export function framesToTimecode(totalFrames: number, fps: number): string {
-  const fpsInt = fpsToInt(fps);
+function frameCountToNdfTimecode(totalFrames: number, fpsInt: number): string {
   const frames = Math.max(0, Math.round(totalFrames));
   const hh = Math.floor(frames / (fpsInt * 3600));
   const mm = Math.floor((frames % (fpsInt * 3600)) / (fpsInt * 60));
@@ -40,6 +39,40 @@ export function framesToTimecode(totalFrames: number, fps: number): string {
   const ff = frames % fpsInt;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(ff)}`;
+}
+
+function frameCountToDfTimecode(totalFrames: number, fpsInt: number): string {
+  const framesPerHour = fpsInt * 60 * 60;
+  const framesPer24Hours = framesPerHour * 24;
+  const dropFrames = fpsInt === 60 ? 4 : 2;
+  const framesPer10Minutes = (fpsInt * 60 * 10) - (dropFrames * 9);
+  const framesPerMinute = (fpsInt * 60) - dropFrames;
+
+  let frameNumber = Math.max(0, Math.round(totalFrames)) % framesPer24Hours;
+  const d = Math.floor(frameNumber / framesPer10Minutes);
+  const m = frameNumber % framesPer10Minutes;
+
+  if (m > dropFrames) {
+    frameNumber += (dropFrames * 9 * d) + (dropFrames * Math.floor((m - dropFrames) / framesPerMinute));
+  } else {
+    frameNumber += dropFrames * 9 * d;
+  }
+
+  const hh = Math.floor(frameNumber / framesPerHour);
+  const mm = Math.floor((frameNumber % framesPerHour) / (fpsInt * 60));
+  const ss = Math.floor((frameNumber % (fpsInt * 60)) / fpsInt);
+  const ff = frameNumber % fpsInt;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  return `${pad(hh)}:${pad(mm)}:${pad(ss)};${pad(ff)}`;
+}
+
+export function framesToTimecode(totalFrames: number, fps: number, options: { dropFrame?: boolean } = {}): string {
+  const fpsInt = fpsToInt(fps);
+  if (options.dropFrame && (fpsInt === 30 || fpsInt === 60)) {
+    return frameCountToDfTimecode(totalFrames, fpsInt);
+  }
+  return frameCountToNdfTimecode(totalFrames, fpsInt);
 }
 
 export function parseTimecodeToFrames(timecode: string, fpsInt: number): number {

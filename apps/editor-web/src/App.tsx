@@ -19,6 +19,8 @@ type BrowserEntry = {
 type RootConfig = { id: string; name: string; path: string };
 type SelectedMedia = { root: RootName; path: string; name: string } | null;
 type TranscriptSource = { root: RootName; path: string } | null;
+
+const APP_VERSION = "1.0.0";
 type TreeSelection = { root: RootName; relPath: string; type: "dir" | "file" } | null;
 
 type TranscribeState = {
@@ -2628,7 +2630,9 @@ export function App() {
           </div>
           <img src={pruneLogo} alt="Prune logo" className="aboutLogo" />
           <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Prune</div>
+          <div className="hint" style={{ marginBottom: 4 }}>Version {APP_VERSION}</div>
           <div className="hint" style={{ marginBottom: 12 }}>Rough cuts at the speed of text.</div>
+          <div className="hint" style={{ marginBottom: 8 }}>Versioning: patch +0.0.1 (minor tweaks), minor +0.1.0 (features), major +1.0.0 (big structural/major feature changes).</div>
           <div className="hint" style={{ marginBottom: 4 }}>Designed by FauxRhino</div>
           <div><a href="mailto:Faux@fauxrhino.com">Faux@fauxrhino.com</a></div>
         </div>

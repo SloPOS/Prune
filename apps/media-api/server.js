@@ -30,6 +30,13 @@ function parseBool(v, fallback = false) {
   return ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
 }
 
+function parseBoundedInt(value, { fallback, min, max }) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const intValue = Math.trunc(parsed);
+  return Math.min(Math.max(intValue, min), max);
+}
+
 function normalizeRelativeDir(dirRaw) {
   const input = typeof dirRaw === 'string' ? dirRaw.trim() : '';
   if (!input) return '';
@@ -100,29 +107,32 @@ async function walkMediaFiles(startPath, { recursive = false, limit = 500 } = {}
   return files;
 }
 
-async function buildMediaRecord(rootPath, absoluteFilePath) {
+async function buildMediaRecord(rootPath, absoluteFilePath, { includeAbsolutePaths = false } = {}) {
   const [stat, transcriptPath] = await Promise.all([
     fs.stat(absoluteFilePath),
     findTranscriptForMedia(absoluteFilePath),
   ]);
 
+  const relativePath = path.relative(rootPath, absoluteFilePath);
+  const transcriptRelativePath = transcriptPath ? path.relative(rootPath, transcriptPath) : null;
+
   return {
     name: path.basename(absoluteFilePath),
-    path: path.relative(rootPath, absoluteFilePath),
-    absolutePath: absoluteFilePath,
+    path: relativePath,
+    absolutePath: includeAbsolutePaths ? absoluteFilePath : undefined,
     extension: path.extname(absoluteFilePath).toLowerCase(),
     sizeBytes: stat.size,
     modifiedAt: stat.mtime.toISOString(),
     transcript: transcriptPath
       ? {
           exists: true,
-          path: path.relative(rootPath, transcriptPath),
-          absolutePath: transcriptPath,
+          path: transcriptRelativePath,
+          absolutePath: includeAbsolutePaths ? transcriptPath : undefined,
         }
       : {
           exists: false,
           path: null,
-          absolutePath: null,
+          absolutePath: includeAbsolutePaths ? null : undefined,
         },
   };
 }
@@ -131,7 +141,12 @@ async function handleListMedia(req, res, url) {
   const rootKey = url.searchParams.get('root') || 'inbox';
   const relativeDir = normalizeRelativeDir(url.searchParams.get('dir') || '');
   const recursive = parseBool(url.searchParams.get('recursive'), false);
-  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 200), 1), 2000);
+  const includeAbsolutePaths = parseBool(url.searchParams.get('includeAbsolutePaths'), false);
+  const limit = parseBoundedInt(url.searchParams.get('limit') || 200, {
+    fallback: 200,
+    min: 1,
+    max: 2000,
+  });
 
   const rootPath = ALLOWED_ROOTS[rootKey];
   if (!rootPath) {
@@ -146,13 +161,16 @@ async function handleListMedia(req, res, url) {
     }
 
     const mediaFiles = await walkMediaFiles(targetDir, { recursive, limit });
-    const items = await Promise.all(mediaFiles.map((f) => buildMediaRecord(rootPath, f)));
+    const items = await Promise.all(
+      mediaFiles.map((f) => buildMediaRecord(rootPath, f, { includeAbsolutePaths })),
+    );
 
     return sendJson(res, 200, {
       root: rootKey,
       rootPath,
       directory: path.relative(rootPath, targetDir) || '.',
       recursive,
+      includeAbsolutePaths,
       limit,
       count: items.length,
       items,

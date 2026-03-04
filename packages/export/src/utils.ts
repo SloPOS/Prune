@@ -152,6 +152,26 @@ export interface FrameKeepRange {
   endFrames: number;
 }
 
+export interface RateFrameKeepRange {
+  inFrames: number;
+  outFrames: number;
+  startFrames: number;
+  endFrames: number;
+}
+
+function mapKeepRangesToFrameRanges(
+  keepRanges: KeepRange[],
+  frameMapper: (seconds: number) => number,
+): FrameKeepRange[] {
+  return keepRanges.map((range) => {
+    const inFrames = frameMapper(range.sourceStartSec);
+    const outFrames = frameMapper(range.sourceEndSec);
+    const startFrames = frameMapper(range.outputStartSec);
+    const endFrames = startFrames + Math.max(0, outFrames - inFrames);
+    return { inFrames, outFrames, startFrames, endFrames };
+  });
+}
+
 export function keepRangesToFrameRanges(
   keepRanges: KeepRange[],
   fps: number,
@@ -159,12 +179,14 @@ export function keepRangesToFrameRanges(
 ): FrameKeepRange[] {
   const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
   const fpsInt = fpsToInt(fps);
+  return mapKeepRangesToFrameRanges(ranges, (seconds) => secondsToFramesWithFpsInt(seconds, fpsInt));
+}
 
-  return ranges.map((range) => {
-    const inFrames = secondsToFramesWithFpsInt(range.sourceStartSec, fpsInt);
-    const outFrames = secondsToFramesWithFpsInt(range.sourceEndSec, fpsInt);
-    const startFrames = secondsToFramesWithFpsInt(range.outputStartSec, fpsInt);
-    const endFrames = startFrames + Math.max(0, outFrames - inFrames);
-    return { inFrames, outFrames, startFrames, endFrames };
-  });
+export function keepRangesToRateFrameRanges(
+  keepRanges: KeepRange[],
+  rate: FrameRate,
+  options: { alreadyNormalized?: boolean } = {},
+): RateFrameKeepRange[] {
+  const ranges = options.alreadyNormalized ? keepRanges : normalizeKeepRanges(keepRanges);
+  return mapKeepRangesToFrameRanges(ranges, (seconds) => secondsToRateFrames(seconds, rate));
 }

@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { inferTimecodeFormat, mediaNameFromSource, normalizeFrameRate, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, rateFramesToFractionSeconds, resolveSourceDurationSec, secondsToRateFrames, xmlEscape } from "./utils.js";
+import { inferTimecodeFormat, keepRangesToRateFrameRanges, mediaNameFromSource, normalizeFrameRate, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, rateFramesToFractionSeconds, resolveSourceDurationSec, secondsToRateFrames, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -29,15 +29,14 @@ export function exportFcpxmlV1(
   const mediaDuration = rateFramesToFractionSeconds(secondsToRateFrames(durationSec, rate), rate);
   const frameDuration = `${rate.fpsDen}/${rate.fpsNum}s`;
 
-  const clips = filtered
-    .map((r, i) => {
-      const sourceStartFrames = secondsToRateFrames(r.sourceStartSec, rate);
-      const sourceEndFrames = secondsToRateFrames(r.sourceEndSec, rate);
-      const outputStartFrames = secondsToRateFrames(r.outputStartSec, rate);
-      const clipDurationFrames = Math.max(0, sourceEndFrames - sourceStartFrames);
-      const startFramesWithTc = tcStartFrames + sourceStartFrames;
+  const frameRanges = keepRangesToRateFrameRanges(filtered, rate, { alreadyNormalized: true });
 
-      return `        <asset-clip name="${xmlEscape(mediaName)} seg ${i + 1}" ref="r2" offset="${rateFramesToFractionSeconds(outputStartFrames, rate)}" start="${rateFramesToFractionSeconds(startFramesWithTc, rate)}" duration="${rateFramesToFractionSeconds(clipDurationFrames, rate)}" />`;
+  const clips = frameRanges
+    .map((range, i) => {
+      const clipDurationFrames = Math.max(0, range.outFrames - range.inFrames);
+      const startFramesWithTc = tcStartFrames + range.inFrames;
+
+      return `        <asset-clip name="${xmlEscape(mediaName)} seg ${i + 1}" ref="r2" offset="${rateFramesToFractionSeconds(range.startFrames, rate)}" start="${rateFramesToFractionSeconds(startFramesWithTc, rate)}" duration="${rateFramesToFractionSeconds(clipDurationFrames, rate)}" />`;
     })
     .join("\n");
 

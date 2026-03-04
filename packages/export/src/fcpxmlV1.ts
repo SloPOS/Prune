@@ -1,5 +1,5 @@
 import type { KeepRange, SourceMediaMetadata } from "./types.js";
-import { mediaNameFromSource, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, resolveSourceDurationSec, xmlEscape } from "./utils.js";
+import { mediaNameFromSource, normalizeFrameRate, normalizeKeepRanges, parseTimecodeToFrames, pathToFileUrl, rateFramesToFractionSeconds, resolveSourceDurationSec, secondsToRateFrames, xmlEscape } from "./utils.js";
 
 export interface FcpxmlV1ExportOptions {
   projectName?: string;
@@ -9,46 +9,12 @@ export interface FcpxmlV1ExportOptions {
   height?: number;
 }
 
-interface Rate {
-  fpsNum: number;
-  fpsDen: number;
-}
-
-const NTSC_RATES: Array<{ fps: number; rate: Rate }> = [
-  { fps: 23.976, rate: { fpsNum: 24000, fpsDen: 1001 } },
-  { fps: 29.97, rate: { fpsNum: 30000, fpsDen: 1001 } },
-  { fps: 59.94, rate: { fpsNum: 60000, fpsDen: 1001 } },
-];
-
-function normalizeRate(fps: number): Rate {
-  const ntsc = NTSC_RATES.find((r) => Math.abs(r.fps - fps) < 0.001);
-  if (ntsc) return ntsc.rate;
-
-  const rounded = Math.round(fps);
-  if (Math.abs(rounded - fps) < 0.001 && rounded > 0) {
-    return { fpsNum: rounded, fpsDen: 1 };
-  }
-
-  const scale = 1000;
-  return { fpsNum: Math.round(fps * scale), fpsDen: scale };
-}
-
-function toFrames(sec: number, rate: Rate): number {
-  return Math.max(0, Math.round((sec * rate.fpsNum) / rate.fpsDen));
-}
-
-function fromFrames(frames: number, rate: Rate): string {
-  const num = frames * rate.fpsDen;
-  const den = rate.fpsNum;
-  return `${num}/${den}s`;
-}
-
 export function exportFcpxmlV1(
   keepRanges: KeepRange[],
   source: SourceMediaMetadata,
   options: FcpxmlV1ExportOptions = {},
 ): string {
-  const rate = normalizeRate(source.fps);
+  const rate = normalizeFrameRate(source.fps);
   const mediaName = mediaNameFromSource(source);
   const eventName = options.eventName ?? "prune";
   const projectName = options.projectName ?? "Bit Cut Timeline";
@@ -58,19 +24,19 @@ export function exportFcpxmlV1(
   const durationSec = resolveSourceDurationSec(source, filtered);
 
   const tcStartFrames = parseTimecodeToFrames(source.timecode, Math.round(rate.fpsNum / rate.fpsDen));
-  const sequenceTcStart = fromFrames(tcStartFrames, rate);
-  const mediaDuration = fromFrames(toFrames(durationSec, rate), rate);
+  const sequenceTcStart = rateFramesToFractionSeconds(tcStartFrames, rate);
+  const mediaDuration = rateFramesToFractionSeconds(secondsToRateFrames(durationSec, rate), rate);
   const frameDuration = `${rate.fpsDen}/${rate.fpsNum}s`;
 
   const clips = filtered
     .map((r, i) => {
-      const sourceStartFrames = toFrames(r.sourceStartSec, rate);
-      const sourceEndFrames = toFrames(r.sourceEndSec, rate);
-      const outputStartFrames = toFrames(r.outputStartSec, rate);
+      const sourceStartFrames = secondsToRateFrames(r.sourceStartSec, rate);
+      const sourceEndFrames = secondsToRateFrames(r.sourceEndSec, rate);
+      const outputStartFrames = secondsToRateFrames(r.outputStartSec, rate);
       const clipDurationFrames = Math.max(0, sourceEndFrames - sourceStartFrames);
       const startFramesWithTc = tcStartFrames + sourceStartFrames;
 
-      return `        <asset-clip name="${xmlEscape(mediaName)} seg ${i + 1}" ref="r2" offset="${fromFrames(outputStartFrames, rate)}" start="${fromFrames(startFramesWithTc, rate)}" duration="${fromFrames(clipDurationFrames, rate)}" />`;
+      return `        <asset-clip name="${xmlEscape(mediaName)} seg ${i + 1}" ref="r2" offset="${rateFramesToFractionSeconds(outputStartFrames, rate)}" start="${rateFramesToFractionSeconds(startFramesWithTc, rate)}" duration="${rateFramesToFractionSeconds(clipDurationFrames, rate)}" />`;
     })
     .join("\n");
 

@@ -68,6 +68,40 @@ export function resolveSourceDurationSec(source: SourceMediaMetadata, keepRanges
   return inferredDurationSec;
 }
 
+export interface FrameRate {
+  fpsNum: number;
+  fpsDen: number;
+}
+
+const NTSC_FRAME_RATES: Array<{ fps: number; rate: FrameRate }> = [
+  { fps: 23.976, rate: { fpsNum: 24000, fpsDen: 1001 } },
+  { fps: 29.97, rate: { fpsNum: 30000, fpsDen: 1001 } },
+  { fps: 59.94, rate: { fpsNum: 60000, fpsDen: 1001 } },
+];
+
+export function normalizeFrameRate(fps: number): FrameRate {
+  const ntsc = NTSC_FRAME_RATES.find((r) => Math.abs(r.fps - fps) < 0.001);
+  if (ntsc) return ntsc.rate;
+
+  const rounded = Math.round(fps);
+  if (Math.abs(rounded - fps) < 0.001 && rounded > 0) {
+    return { fpsNum: rounded, fpsDen: 1 };
+  }
+
+  const scale = 1000;
+  return { fpsNum: Math.round(fps * scale), fpsDen: scale };
+}
+
+export function secondsToRateFrames(sec: number, rate: FrameRate): number {
+  return Math.max(0, Math.round((sec * rate.fpsNum) / rate.fpsDen));
+}
+
+export function rateFramesToFractionSeconds(frames: number, rate: FrameRate): string {
+  const num = frames * rate.fpsDen;
+  const den = rate.fpsNum;
+  return `${num}/${den}s`;
+}
+
 export interface FrameKeepRange {
   inFrames: number;
   outFrames: number;

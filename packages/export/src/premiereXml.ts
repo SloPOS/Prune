@@ -8,6 +8,32 @@ export interface PremiereXmlExportOptions {
   height?: number;
 }
 
+function xmlRateBlock(fps: number): string {
+  return `<rate>
+            <timebase>${fps}</timebase>
+            <ntsc>FALSE</ntsc>
+          </rate>`;
+}
+
+function buildClipItem(
+  id: number,
+  name: string,
+  inFrames: number,
+  outFrames: number,
+  startFrames: number,
+  endFrames: number,
+): string {
+  return `            <clipitem id="clipitem-${id}">
+              <name>${xmlEscape(name)}</name>
+              <enabled>TRUE</enabled>
+              <start>${startFrames}</start>
+              <end>${endFrames}</end>
+              <in>${inFrames}</in>
+              <out>${outFrames}</out>
+              <file id="file-1"></file>
+            </clipitem>`;
+}
+
 // frame conversion helpers are centralized in utils.ts
 
 export function exportPremiereXml(
@@ -32,16 +58,7 @@ export function exportPremiereXml(
   const clipItems = clipFrameRanges
     .map(({ inFrames, outFrames, startFrames, endFrames }, i) => {
       const name = `${mediaName} seg ${i + 1}`;
-
-      return `            <clipitem id="clipitem-${i + 1}">
-              <name>${xmlEscape(name)}</name>
-              <enabled>TRUE</enabled>
-              <start>${startFrames}</start>
-              <end>${endFrames}</end>
-              <in>${inFrames}</in>
-              <out>${outFrames}</out>
-              <file id="file-1"></file>
-            </clipitem>`;
+      return buildClipItem(i + 1, name, inFrames, outFrames, startFrames, endFrames);
     })
     .join("\n");
 
@@ -57,15 +74,9 @@ export function exportPremiereXml(
       <sequence id="sequence-1">
         <name>${xmlEscape(sequenceName)}</name>
         <duration>${sequenceDurationFrames}</duration>
-        <rate>
-          <timebase>${fps}</timebase>
-          <ntsc>FALSE</ntsc>
-        </rate>
+        ${xmlRateBlock(fps)}
         <timecode>
-          <rate>
-            <timebase>${fps}</timebase>
-            <ntsc>FALSE</ntsc>
-          </rate>
+          ${xmlRateBlock(fps)}
           <frame>${sourceTcFrames}</frame>
           <displayformat>NDF</displayformat>
         </timecode>
@@ -73,10 +84,7 @@ export function exportPremiereXml(
           <video>
             <format>
               <samplecharacteristics>
-                <rate>
-                  <timebase>${fps}</timebase>
-                  <ntsc>FALSE</ntsc>
-                </rate>
+                ${xmlRateBlock(fps)}
                 <width>${options.width ?? 1920}</width>
                 <height>${options.height ?? 1080}</height>
               </samplecharacteristics>
@@ -90,15 +98,9 @@ ${clipItems}
       <clip id="masterclip-1">
         <name>${xmlEscape(mediaName)}</name>
         <duration>${sourceDurationFrames}</duration>
-        <rate>
-          <timebase>${fps}</timebase>
-          <ntsc>FALSE</ntsc>
-        </rate>
+        ${xmlRateBlock(fps)}
         <timecode>
-          <rate>
-            <timebase>${fps}</timebase>
-            <ntsc>FALSE</ntsc>
-          </rate>
+          ${xmlRateBlock(fps)}
           <frame>${sourceTcFrames}</frame>
           <displayformat>NDF</displayformat>
         </timecode>
@@ -117,10 +119,7 @@ ${clipItems}
         <name>${xmlEscape(mediaName)}</name>
         <pathurl>${xmlEscape(pathToFileUrl(source.path))}</pathurl>
         <duration>${sourceDurationFrames}</duration>
-        <rate>
-          <timebase>${fps}</timebase>
-          <ntsc>FALSE</ntsc>
-        </rate>
+        ${xmlRateBlock(fps)}
       </file>
     </children>
   </project>

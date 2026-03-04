@@ -403,10 +403,11 @@ function toTimelineKeepRanges(keepRanges: Array<{ startSec: number; endSec: numb
   });
 }
 
-function normalizeKeepRanges(body: { keepRanges?: RangeInput[]; cuts?: RangeInput[] }): { startSec: number; endSec: number }[] {
+function normalizeKeepRanges(body: { keepRanges?: RangeInput[]; cuts?: RangeInput[] }, options?: { preserveOrder?: boolean }): { startSec: number; endSec: number }[] {
+  const preserveOrder = Boolean(options?.preserveOrder);
   const keeps = Array.isArray(body.keepRanges) ? body.keepRanges.map(normalizeRange).filter((v): v is { startSec: number; endSec: number } => Boolean(v)) : [];
   if (keeps.length > 0) {
-    return keeps.sort((a, b) => a.startSec - b.startSec);
+    return preserveOrder ? keeps : keeps.sort((a, b) => a.startSec - b.startSec);
   }
 
   const cuts = Array.isArray(body.cuts) ? body.cuts.map(normalizeRange).filter((v): v is { startSec: number; endSec: number } => Boolean(v)) : [];
@@ -970,14 +971,19 @@ type RenderOptions = {
   fps?: number;
   width?: number;
   height?: number;
+  fadeInSec?: number;
+  fadeOutSec?: number;
 };
 
 function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: { startSec: number; endSec: number }[], opts: RenderOptions, hasAudio: boolean): string[] {
   const trim = (n: number) => Number(n.toFixed(3));
   const size = opts.width && opts.height ? `${Math.max(2, Math.round(opts.width))}x${Math.max(2, Math.round(opts.height))}` : null;
   const audioCodec = opts.container === "webm" ? "libopus" : "aac";
+  const fadeIn = Math.max(0, Number(opts.fadeInSec || 0));
+  const fadeOut = Math.max(0, Number(opts.fadeOutSec || 0));
+  const hasFades = fadeIn > 0 || fadeOut > 0;
 
-  if (keepRanges.length === 1) {
+  if (keepRanges.length === 1 && !hasFades) {
     const r = keepRanges[0];
     const args = ["-y", "-hide_banner", "-i", absInput, "-ss", `${trim(r.startSec)}`, "-to", `${trim(r.endSec)}`, "-c:v", opts.encoder];
     if (opts.encoder === "libx264" || opts.encoder === "libx265") args.push("-preset", "veryfast");
@@ -995,10 +1001,21 @@ function ffmpegArgsForRanges(absInput: string, outputPath: string, keepRanges: {
   keepRanges.forEach((r, i) => {
     const s = trim(r.startSec);
     const e = trim(r.endSec);
-    filterParts.push(`[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS[v${i}]`);
+    const duration = Math.max(0.001, e - s);
+    const fadeInDur = Math.min(fadeIn, duration / 2);
+    const fadeOutDur = Math.min(fadeOut, duration / 2);
+
+    const vFilters = [`trim=start=${s}:end=${e}`, "setpts=PTS-STARTPTS"];
+    if (fadeInDur > 0) vFilters.push(`fade=t=in:st=0:d=${trim(fadeInDur)}`);
+    if (fadeOutDur > 0) vFilters.push(`fade=t=out:st=${trim(Math.max(0, duration - fadeOutDur))}:d=${trim(fadeOutDur)}`);
+    filterParts.push(`[0:v]${vFilters.join(",")}[v${i}]`);
     concatInputs.push(`[v${i}]`);
+
     if (hasAudio) {
-      filterParts.push(`[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS[a${i}]`);
+      const aFilters = [`atrim=start=${s}:end=${e}`, "asetpts=PTS-STARTPTS"];
+      if (fadeInDur > 0) aFilters.push(`afade=t=in:st=0:d=${trim(fadeInDur)}`);
+      if (fadeOutDur > 0) aFilters.push(`afade=t=out:st=${trim(Math.max(0, duration - fadeOutDur))}:d=${trim(fadeOutDur)}`);
+      filterParts.push(`[0:a]${aFilters.join(",")}[a${i}]`);
       concatInputs.push(`[a${i}]`);
     }
   });
@@ -1967,7 +1984,8 @@ function studioApiPlugin(): Plugin {
           const width = Number(render.width || 0);
           const height = Number(render.height || 0);
           const outputName = sanitizeOutputName(String(body.outputName ?? ""), relPath, container);
-          const keepRanges = normalizeKeepRanges(body);
+          const sequenceMode = String(body.sequenceMode || "timeline").toLowerCase();
+          const keepRanges = normalizeKeepRanges(body, { preserveOrder: sequenceMode === "fun" });
           const rootMap = getRootMap();
 
           if (!(root in rootMap)) {
@@ -2048,6 +2066,8 @@ function studioApiPlugin(): Plugin {
               fps: fps > 0 ? fps : undefined,
               width: width > 0 ? width : undefined,
               height: height > 0 ? height : undefined,
+              fadeInSec: Math.max(0, Number(render.fadeInSec || 0)),
+              fadeOutSec: Math.max(0, Number(render.fadeOutSec || 0)),
             }, hasAudio));
             finalCode = code;
             if (code === 0) break;

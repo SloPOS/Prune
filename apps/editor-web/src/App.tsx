@@ -114,7 +114,13 @@ type GapSuggestion = {
   trimSec: number;
 };
 
+type FunSequenceItem = {
+  id: string;
+  tokenId: string;
+};
+
 const EXPORT_JOB_STORAGE_KEY = "prune-export-job";
+const FUN_MODE_STORAGE_KEY = "prune-fun-mode";
 
 const FIXED_SMART_CLEANUP_PHRASES = [
   "um", "uh", "ah", "er", "mm-hmm",
@@ -328,7 +334,16 @@ export function App() {
   const [gapMinThresholdSec, setGapMinThresholdSec] = useState(0.8);
   const [gapLeaveBehindSec, setGapLeaveBehindSec] = useState(0.12);
   const [appliedGapCuts, setAppliedGapCuts] = useState<TimeRange[]>([]);
-  const [openToolPanel, setOpenToolPanel] = useState<"smart" | "gap" | "summary" | null>(null);
+  const [openToolPanel, setOpenToolPanel] = useState<"smart" | "gap" | "summary" | "fun" | null>(null);
+  const [funModeLocked, setFunModeLocked] = useState(false);
+  const [showFunEnableModal, setShowFunEnableModal] = useState(false);
+  const [funSequence, setFunSequence] = useState<FunSequenceItem[]>([]);
+  const [funDragTokenId, setFunDragTokenId] = useState<string | null>(null);
+  const [funDragSequenceId, setFunDragSequenceId] = useState<string | null>(null);
+  const [funFadeInSec, setFunFadeInSec] = useState(0);
+  const [funFadeOutSec, setFunFadeOutSec] = useState(0);
+  const [isFunPreviewing, setIsFunPreviewing] = useState(false);
+  const [funPreviewIndex, setFunPreviewIndex] = useState(0);
   const [dragStartIndex, setDragStartIndex] = useState<number | null>(null);
   const [dragEndIndex, setDragEndIndex] = useState<number | null>(null);
   const [isDraggingTokens, setIsDraggingTokens] = useState(false);
@@ -358,6 +373,9 @@ export function App() {
   const confirmDeleteModalRef = useRef<HTMLDivElement | null>(null);
   const projectNameModalRef = useRef<HTMLDivElement | null>(null);
   const exportPreviewRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const isFunPreviewingRef = useRef(false);
+  const funPreviewIndexRef = useRef(0);
   const prevExportStatusRef = useRef<ExportState["status"]>("idle");
   const prevExportJobIdRef = useRef<string | null>(null);
 
@@ -374,12 +392,34 @@ export function App() {
       setExportState((prev) => ({ ...prev, jobId: savedExportJobId, status: "running" }));
       setShowExportProgressModal(true);
     }
+
+    const savedFunMode = window.localStorage.getItem(FUN_MODE_STORAGE_KEY);
+    if (savedFunMode) {
+      try {
+        const parsed = JSON.parse(savedFunMode);
+        setFunModeLocked(Boolean(parsed?.funModeLocked));
+        setFunSequence(Array.isArray(parsed?.funSequence) ? parsed.funSequence : []);
+        setFunFadeInSec(Math.max(0, Number(parsed?.funFadeInSec || 0)));
+        setFunFadeOutSec(Math.max(0, Number(parsed?.funFadeOutSec || 0)));
+      } catch {}
+    }
   }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", isLightMode ? "light" : "dark");
     window.localStorage.setItem("bitcut-theme", isLightMode ? "light" : "dark");
   }, [isLightMode]);
+
+
+  useEffect(() => {
+    const payload = {
+      funModeLocked,
+      funSequence,
+      funFadeInSec,
+      funFadeOutSec,
+    };
+    window.localStorage.setItem(FUN_MODE_STORAGE_KEY, JSON.stringify(payload));
+  }, [funModeLocked, funSequence, funFadeInSec, funFadeOutSec]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1100px)");
@@ -575,11 +615,20 @@ export function App() {
   const cuts = useMemo(() => mergeTimeRanges([...tokenCuts, ...effectiveGapCuts]), [tokenCuts, effectiveGapCuts]);
   const transcriptDurationSec = useMemo(() => tokens.reduce((max, t) => Math.max(max, t.endSec), 0), [tokens]);
   const keeps = useMemo(() => keepRangesFromCuts(transcriptDurationSec, cuts), [cuts, transcriptDurationSec]);
+  const tokenById = useMemo(() => new Map(tokens.map((t) => [t.id, t])), [tokens]);
+  const funKeepRanges = useMemo(() => {
+    if (!funModeLocked) return [] as Array<{ startSec: number; endSec: number }>;
+    return funSequence
+      .map((item) => tokenById.get(item.tokenId))
+      .filter((token): token is WordToken => Boolean(token))
+      .map((token) => ({ startSec: token.startSec, endSec: token.endSec }));
+  }, [funModeLocked, funSequence, tokenById]);
   const renderKeeps = useMemo(() => {
+    if (funModeLocked && funKeepRanges.length > 0) return funKeepRanges;
     if (keeps.length > 0) return keeps;
     if (videoDurationSec > 0) return [{ sourceStartSec: 0, sourceEndSec: videoDurationSec, startSec: 0, endSec: videoDurationSec } as any];
     return [];
-  }, [keeps, videoDurationSec]);
+  }, [funModeLocked, funKeepRanges, keeps, videoDurationSec]);
   const totalCutSec = useMemo(() => cuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0), [cuts]);
   const totalKeepSec = useMemo(() => keeps.reduce((sum, k) => sum + (k.sourceEndSec - k.sourceStartSec), 0), [keeps]);
 
@@ -655,6 +704,8 @@ export function App() {
     }
     return ids;
   }, [dragStartIndex, dragEndIndex, tokens]);
+
+  const funScriptText = useMemo(() => funSequence.map((item) => tokenById.get(item.tokenId)?.text || "").filter(Boolean).join(" "), [funSequence, tokenById]);
 
   async function loadSettingsAndRoots() {
     const response = await fetch("/api/settings");
@@ -736,6 +787,12 @@ export function App() {
     const t = window.setTimeout(() => setToast(null), 2600);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => () => cancelTokenLongPressForFun(), []);
+
+  useEffect(() => { isFunPreviewingRef.current = isFunPreviewing; }, [isFunPreviewing]);
+  useEffect(() => { funPreviewIndexRef.current = funPreviewIndex; }, [funPreviewIndex]);
+
 
   useEffect(() => {
     if (!showSettings) return;
@@ -864,8 +921,13 @@ export function App() {
   function applyLoadedProjectData(data: any) {
     const deletedIds = Array.isArray(data.deletedTokenIds) ? data.deletedTokenIds.map((v: unknown) => String(v)) : [];
     const gapCuts = Array.isArray(data.appliedGapCuts) ? data.appliedGapCuts : [];
+    const nextFunSequence = Array.isArray(data.funSequence) ? data.funSequence.map((item: any, idx: number) => ({ id: String(item?.id || `${Date.now()}-${idx}`), tokenId: String(item?.tokenId || "") })).filter((item: FunSequenceItem) => item.tokenId) : [];
     setDeleted(new Set(deletedIds));
     setAppliedGapCuts(gapCuts);
+    setFunModeLocked(Boolean(data.funModeLocked));
+    setFunSequence(nextFunSequence);
+    setFunFadeInSec(Math.max(0, Number(data.funFadeInSec || 0)));
+    setFunFadeOutSec(Math.max(0, Number(data.funFadeOutSec || 0)));
     if (typeof data.exportName === "string" && data.exportName.trim()) setExportName(data.exportName);
     setCurrentProjectId(typeof data.projectId === "string" ? data.projectId : null);
     setCurrentProjectName(typeof data.projectName === "string" ? data.projectName : "");
@@ -939,6 +1001,10 @@ export function App() {
         transcriptPath: transcriptSource?.path ?? null,
         deletedTokenIds: Array.from(deleted),
         appliedGapCuts,
+        funModeLocked,
+        funSequence,
+        funFadeInSec,
+        funFadeOutSec,
       }),
     });
     if (!response.ok) {
@@ -968,6 +1034,7 @@ export function App() {
     setUndoStack([]);
     setCurrentProjectId(null);
     setCurrentProjectName("");
+    clearFunSessionState();
   }
 
   async function openFileEntry(root: RootName, relPath: string, opts?: { skipPrompt?: boolean; skipAutoTranscript?: boolean }) {
@@ -1114,13 +1181,16 @@ export function App() {
         path: selectedMedia.path,
         outputName: exportName,
         keepRanges: renderKeeps,
-        cuts,
+        cuts: funModeLocked ? [] : cuts,
+        sequenceMode: funModeLocked ? "fun" : "timeline",
         render: {
           container: renderContainer,
           codec: renderCodec,
           fps: fpsValue || undefined,
           width: resPreset.width || undefined,
           height: resPreset.height || undefined,
+          fadeInSec: funModeLocked ? funFadeInSec : 0,
+          fadeOutSec: funModeLocked ? funFadeOutSec : 0,
         },
       }),
     });
@@ -1581,6 +1651,15 @@ export function App() {
     });
   }
 
+  function addTokenRangeToFunSequence(a: number, b: number) {
+    const start = Math.max(0, Math.min(a, b));
+    const end = Math.min(tokens.length - 1, Math.max(a, b));
+    if (start > end) return;
+    const ids = tokens.slice(start, end + 1).map((t) => t.id);
+    ids.forEach((id) => addTokenToFunSequence(id));
+    setToast(`Added ${ids.length} word${ids.length === 1 ? "" : "s"} to Fun sequence`);
+  }
+
   function getActiveMediaEl() {
     return mobileVideoRef.current ?? mobileAudioRef.current ?? videoRef.current ?? audioRef.current;
   }
@@ -1667,6 +1746,29 @@ export function App() {
     const t = el.currentTime;
     setCurrentTimeSec(t);
     setActiveTokenIndex(tokenAtTime(tokens, t));
+
+    if (isFunPreviewingRef.current && funKeepRanges.length > 0) {
+      const idx = funPreviewIndexRef.current;
+      const clip = funKeepRanges[idx];
+      if (!clip) {
+        stopFunPreview();
+        return;
+      }
+      if (t >= (clip.endSec - 0.01)) {
+        const nextIdx = idx + 1;
+        const next = funKeepRanges[nextIdx];
+        if (!next) {
+          stopFunPreview();
+          return;
+        }
+        setFunPreviewIndex(nextIdx);
+        const nextStart = Math.max(0, next.startSec + 0.01);
+        el.currentTime = nextStart;
+        setCurrentTimeSec(nextStart);
+      }
+      return;
+    }
+
     if (!previewCuts || cuts.length === 0) return;
     const hitCut = cuts.find((cut) => t >= cut.startSec && t < cut.endSec);
     if (!hitCut) return;
@@ -1714,6 +1816,84 @@ export function App() {
     setIsDraggingTokens(false);
     setDragStartIndex(null);
     setDragEndIndex(null);
+  }
+
+  function stopFunPreview() {
+    setIsFunPreviewing(false);
+    setFunPreviewIndex(0);
+    const mediaEl = getActiveMediaEl();
+    if (mediaEl) mediaEl.pause();
+  }
+
+  function startFunPreview() {
+    if (!funModeLocked || funKeepRanges.length === 0) return;
+    const mediaEl = getActiveMediaEl();
+    if (!mediaEl) return;
+    setIsFunPreviewing(true);
+    setFunPreviewIndex(0);
+    const first = funKeepRanges[0];
+    if (!first) return;
+    const start = Math.max(0, first.startSec + 0.01);
+    mediaEl.currentTime = start;
+    setCurrentTimeSec(start);
+    void mediaEl.play();
+  }
+
+  function clearFunSessionState() {
+    setFunModeLocked(false);
+    setFunSequence([]);
+    setFunDragTokenId(null);
+    setFunDragSequenceId(null);
+    setFunFadeInSec(0);
+    setFunFadeOutSec(0);
+    setIsFunPreviewing(false);
+    setFunPreviewIndex(0);
+    window.localStorage.removeItem(FUN_MODE_STORAGE_KEY);
+  }
+
+  function enableFunMode() {
+    setFunModeLocked(true);
+    setOpenToolPanel("fun");
+    setShowFunEnableModal(false);
+    setFunSequence([]);
+    if (isMobileLayout) setMobileTab("transcript");
+  }
+
+  function addTokenToFunSequence(tokenId: string) {
+    setFunSequence((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, tokenId }]);
+  }
+
+  function startTokenLongPressForFun(tokenId: string) {
+    if (!funModeLocked) return;
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      addTokenToFunSequence(tokenId);
+      setToast("Added to Fun sequence");
+      longPressTimerRef.current = null;
+    }, 420);
+  }
+
+  function cancelTokenLongPressForFun() {
+    if (!longPressTimerRef.current) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  }
+
+  function removeFunSequenceItem(id: string) {
+    setFunSequence((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  function moveFunSequenceItem(itemId: string, targetIndex: number) {
+    setFunSequence((prev) => {
+      const fromIndex = prev.findIndex((item) => item.id === itemId);
+      if (fromIndex < 0) return prev;
+      const bounded = Math.max(0, Math.min(targetIndex, prev.length - 1));
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      if (!moved) return prev;
+      next.splice(bounded, 0, moved);
+      return next;
+    });
   }
 
   const visiblePickerRoots = filePickerIntent === "json"
@@ -1783,7 +1963,7 @@ export function App() {
       {isMobileLayout && (
         <div className="mobilePaneSwitch row">
           <button className={mobileTab === "media" ? "active" : ""} onClick={() => setMobileTab("media")}>Media</button>
-          <button className={mobileTab === "transcript" ? "active" : ""} onClick={() => setMobileTab("transcript")} disabled={tokens.length === 0}>Transcript</button>
+          <button className={`${mobileTab === "transcript" ? "active" : ""} ${funModeLocked ? "funNavBtn" : ""}`} onClick={() => setMobileTab("transcript")} disabled={tokens.length === 0}>{funModeLocked ? "Fun tab" : "Transcript"}</button>
           <button className={mobileTab === "tools" ? "active" : ""} onClick={() => setMobileTab("tools")}>Tools</button>
           <button className={mobileTab === "render" ? "active" : ""} onClick={() => setMobileTab("render")}>Render</button>
           <div className="appMenuWrap">
@@ -2025,7 +2205,7 @@ export function App() {
         )}
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <div className="row" style={{ marginBottom: 0, alignItems: "center" }}>
-            <h2 style={{ margin: 0 }}>Transcript</h2>
+            <h2 style={{ margin: 0 }}>{funModeLocked ? "Fun tab" : "Transcript"}</h2>
             <button title="Show/hide transcript tips" onClick={() => setShowTranscriptTips((v) => !v)}>ℹ️</button>
           </div>
           <div className="row" style={{ marginBottom: 0 }}>
@@ -2033,9 +2213,23 @@ export function App() {
             <button title="Toggle range select mode" className={rangeSelectMode ? "active" : ""} onClick={() => { setRangeSelectMode((v) => !v); setRangeSelectAnchor(null); setWordEditMode(false); }}>Range</button>
             <button title="Toggle word edit mode (text only, no timing changes)" className={wordEditMode ? "active" : ""} onClick={() => { setWordEditMode((v) => !v); setRangeSelectMode(false); setRangeSelectAnchor(null); }}>Edit</button>
             <button title="Undo last transcript removal action" onClick={() => undoLastDeleteAction()} disabled={undoStack.length === 0}>Undo</button>
+            {funModeLocked && <button onClick={isFunPreviewing ? stopFunPreview : startFunPreview} disabled={funSequence.length === 0}>{isFunPreviewing ? "Stop Preview" : "Preview Fun"}</button>}
           </div>
         </div>
-        {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. Tap Edit to correct individual words without changing timing. Double-click a word to play from it.</div>}
+        {showTranscriptTips && <div className="hint">Multi-select: desktop = click and drag across words, then release. Mobile = tap Range, tap first word (anchor), tap last word to apply span. In Fun mode, Range adds that span to the jumbled script. Tap Edit to correct individual words without changing timing. Double-click a word to play from it.</div>}
+
+        {!funModeLocked && tokens.length > 0 && (
+          <div className="row" style={{ marginBottom: 8 }}>
+            <button className="onboardingBtn" onClick={() => setShowFunEnableModal(true)}>Enable Fun mode (experimental)</button>
+          </div>
+        )}
+
+        {funModeLocked && (
+          <div className="funScriptPanel">
+            <div className="cleanupTitle" style={{ marginBottom: 4 }}><span>Jumbled Fun Script</span><span className="count">{funSequence.length} words</span></div>
+            <div className="funScriptText">{funScriptText || "(empty — long-press words below or use Range mode to add spans)"}</div>
+          </div>
+        )}
 
         {tokens.length === 0 ? (
           <div className="transcriptParagraph" style={{ display: "grid", placeItems: "center", textAlign: "center" }}>
@@ -2048,7 +2242,7 @@ export function App() {
             </div>
           </div>
         ) : (
-          <p className="transcriptParagraph">
+          <p className={`transcriptParagraph ${funModeLocked ? "funTranscriptBottom" : ""}`}>
             {tokens.map((t, index) => {
               const className = ["tokenInline", deleted.has(t.id) ? "deleted" : "", index === activeTokenIndex ? "active" : "", highlightedTokenIds.has(t.id) ? "highlighted" : "", isDraggingTokens && dragSelectedTokenIds.has(t.id) ? "dragSelected" : ""].filter(Boolean).join(" ");
               if (wordEditMode && editingTokenId === t.id) {
@@ -2075,7 +2269,7 @@ export function App() {
                   </span>
                 );
               }
-              return <span key={t.id}><button data-token-index={index} onMouseDown={wordEditMode ? undefined : () => beginTokenDrag(index)} onMouseEnter={wordEditMode ? undefined : () => continueTokenDrag(index)} onMouseUp={wordEditMode ? undefined : () => endTokenDrag()} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (wordEditMode) { beginWordEdit(t); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } toggle(t.id); }} onDoubleClick={() => { if (!wordEditMode) playFromToken(t); }} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
+              return <span key={t.id}><button data-token-index={index} onMouseDown={wordEditMode ? undefined : () => beginTokenDrag(index)} onMouseEnter={wordEditMode ? undefined : () => continueTokenDrag(index)} onMouseUp={wordEditMode ? undefined : () => endTokenDrag()} onTouchStart={() => startTokenLongPressForFun(t.id)} onTouchMove={cancelTokenLongPressForFun} onTouchEnd={cancelTokenLongPressForFun} onTouchCancel={cancelTokenLongPressForFun} onClick={() => { if (suppressNextTokenClick) { setSuppressNextTokenClick(false); return; } if (wordEditMode) { beginWordEdit(t); return; } if (rangeSelectMode) { if (rangeSelectAnchor === null) { setRangeSelectAnchor(index); setToast(`Range anchor set at word ${index + 1}`); } else { if (funModeLocked) addTokenRangeToFunSequence(rangeSelectAnchor, index); else toggleRangeByIndex(rangeSelectAnchor, index); setRangeSelectAnchor(null); } return; } if (funModeLocked && isMobileLayout) return; toggle(t.id); }} onDoubleClick={() => { if (!wordEditMode) playFromToken(t); }} className={className} title={`${t.startSec.toFixed(2)}s - ${t.endSec.toFixed(2)}s (double-click to play from here)`}>{t.text}</button>{" "}</span>;
             })}
           </p>
         )}
@@ -2149,6 +2343,7 @@ export function App() {
               <li>Gap trims applied: {appliedGapCuts.length} ({appliedGapCuts.reduce((sum, c) => sum + (c.endSec - c.startSec), 0).toFixed(2)}s){gapShortenerEnabled ? "" : " (disabled)"}</li>
               <li>Cut ranges: {cuts.length} ({totalCutSec.toFixed(2)}s)</li>
               <li>Keep ranges: {keeps.length} ({totalKeepSec.toFixed(2)}s)</li>
+              <li>Fun sequence ranges: {funKeepRanges.length}{funModeLocked ? " (active)" : ""}</li>
             </ul>
             <details>
               <summary>Raw cut/keep JSON debug</summary>
@@ -2156,6 +2351,8 @@ export function App() {
               <pre>{JSON.stringify(cuts, null, 2)}</pre>
               <h4>Computed keep ranges</h4>
               <pre>{JSON.stringify(keeps, null, 2)}</pre>
+              <h4>Fun keep ranges (ordered)</h4>
+              <pre>{JSON.stringify(funKeepRanges, null, 2)}</pre>
             </details>
           </details>
         </div>
@@ -2186,6 +2383,31 @@ export function App() {
         </div>
       </div>
     )}
+    {showFunEnableModal && (
+      <div className="settingsOverlay" onClick={() => setShowFunEnableModal(false)}>
+        <div className="settingsModal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Enable Fun mode? (Experimental)</h3>
+            <button onClick={() => setShowFunEnableModal(false)}>✕</button>
+          </div>
+          <div className="hint" style={{ marginTop: 8 }}>
+            This mode is experimental and can create transcript/sequence mismatch issues.
+            Once enabled, this session is locked to Fun mode.
+            To disable it, you must clear the workspace/session via Clear project.
+          </div>
+          <ul>
+            <li>Exports will follow your custom word sequence order.</li>
+            <li>Standard timeline assumptions may not apply.</li>
+            <li>Save your project to preserve sequence + fade settings.</li>
+          </ul>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button onClick={() => setShowFunEnableModal(false)}>Cancel</button>
+            <button className="onboardingBtn" onClick={enableFunMode}>Enable & lock Fun mode</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {showGalleryModal && (
       <div className="settingsOverlay" onClick={() => setShowGalleryModal(false)}>
         <div className="settingsModal galleryModal" style={{ maxWidth: 1100, width: "min(1100px, 96vw)", maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>

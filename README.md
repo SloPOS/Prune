@@ -122,6 +122,20 @@ For the fastest automated setup, run our installation script directly in your te
 curl -fsSL https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh | bash
 ```
 
+### Homebrew (macOS)
+
+Install Prune via the Homebrew tap:
+
+```bash
+brew tap SloPOS/prune
+brew install prune
+prune
+```
+
+Then open: `http://localhost:4173`
+
+> This Homebrew install path is additive and does **not** replace Docker or the curl installer.
+
 ### Docker Compose (Recommended)
 
 The easiest and most reliable way to run Prune locally is via Docker.

@@ -134,7 +134,6 @@ prune
 
 Then open: `http://localhost:4173`
 
-> This Homebrew install path is additive and does **not** replace Docker or the curl installer.
 
 ### Docker Compose (Recommended)
 

@@ -3,14 +3,14 @@ import { fetchJsonSafe, normalizeRunningStatus, startPolling } from "../utils/ap
 
 type TranscribeStateLike = {
   jobId: string | null;
-  status: string;
+  status: "idle" | "starting" | "running" | "done" | "error";
   log: string[];
   error: string | null;
   transcriptRelPath: string | null;
   startedAt?: number;
   mediaDurationSec?: number;
   transcribedSec?: number;
-  phase?: string;
+  phase?: "queued" | "extracting" | "transcribing" | "finalizing" | "done" | "error";
   percent?: number | null;
   etaSec?: number | null;
   speedLabel?: string | null;
@@ -18,7 +18,7 @@ type TranscribeStateLike = {
 
 type ExportStateLike = {
   jobId: string | null;
-  status: string;
+  status: "idle" | "starting" | "running" | "done" | "error";
   outputPath: string | null;
   error: string | null;
   log: string[];

@@ -1,10 +1,17 @@
 {
-  "name": "@prune/core",
+  "name": "@prune/cli",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "prune": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@prune/core": "*",
+    "@prune/export": "*"
   }
 }

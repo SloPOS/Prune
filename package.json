@@ -13,11 +13,13 @@
   ],
   "scripts": {
     "build": "npm --workspace apps/editor-web run build",
+    "build:cli": "npm run build --workspace packages/core && npm run build --workspace packages/export && npm run build --workspace packages/cli",
     "dev": "npm --workspace apps/editor-web run dev",
     "test": "npm --workspace packages/export run validate:fixtures",
     "test:exports": "npm --workspace packages/export run validate:fixtures",
     "test:interop": "npm --workspace packages/export run test:interop",
     "ci": "npm run build && npm run test:exports && npm run test:interop",
+    "prune": "node packages/cli/dist/index.js",
     "transcribe:install": "python3 -m pip install -r scripts/requirements.txt",
     "transcribe:extract": "bash scripts/extract-audio-wav.sh",
     "transcribe:whisper": "python3 scripts/transcribe_whisper.py",

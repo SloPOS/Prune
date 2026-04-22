@@ -130,6 +130,10 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
+const edlJobs = new Map<string, EdlExportJob>();
+const premiereXmlJobs = new Map<string, PremiereXmlExportJob>();
+const aeMarkerJobs = new Map<string, MarkerExportJob>();
+const aafBridgeJobs = new Map<string, any>();
 
 const RENDER_STATUS_PATH = path.resolve(REPO_ROOT, "data", "render-status.json");
 let latestRenderStatus: RenderStatusSnapshot = (() => {
@@ -384,7 +388,7 @@ function sanitizeProjectName(raw: string): string {
 }
 
 function projectsDir(): string {
-  return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir);
+  return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || "data/projects");
 }
 
 
@@ -2616,7 +2620,7 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const sourceMetadata = probeSourceMetadata(absMedia);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
           const source = {
             path: absMedia,
             name: path.basename(absMedia),
@@ -2625,17 +2629,18 @@ function studioApiPlugin(): Plugin {
             durationSec: sourceMetadata.durationSec,
           };
 
-          const manifest = buildAafBridgeManifest(keepRanges as KeepRange[], source);
-          const fcpxml = exportFcpxmlV1(keepRanges as KeepRange[], source, {
+          const timelineRanges = toTimelineKeepRanges(keepRanges);
+          const manifest = buildAafBridgeManifest(timelineRanges, source);
+          const fcpxml = exportFcpxmlV1(timelineRanges, source, {
             projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             eventName: "prune",
           });
-          const edl = exportEdlCmx3600(keepRanges as KeepRange[], source, {
+          const edl = exportEdlCmx3600(timelineRanges, source, {
             title: outputName.replace(/\.zip$/, "").toUpperCase().slice(0, 64),
             reel: source.name,
           });
-          const premiereXml = exportPremiereXml(keepRanges as KeepRange[], source, {
+          const premiereXml = exportPremiereXml(timelineRanges, source, {
             projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
           });

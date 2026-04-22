@@ -40,7 +40,7 @@ function ensureManagedDirs() {
     studioSettings.uploadDir,
     studioSettings.exportDir,
     studioSettings.transcriptDir,
-    studioSettings.projectsDir,
+    projectsDir(),
   ].filter((d): d is string => Boolean(d));
   for (const dir of dirs) {
     try { fs.mkdirSync(path.resolve(dir), { recursive: true }); } catch {}
@@ -1095,7 +1095,7 @@ function studioApiPlugin(): Plugin {
           const uploadPath = studioSettings.uploadDir || path.join(firstRoot, "uploads");
           const exportPath = studioSettings.exportDir || path.join(firstRoot, "exports");
           const transcriptPath = studioSettings.transcriptDir || path.join(firstRoot, "transcripts");
-          const projectsPath = studioSettings.projectsDir || path.join(firstRoot, "projects");
+          const projectsPath = projectsDir();
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ roots, upload: pathHealth(uploadPath), export: pathHealth(exportPath), transcripts: pathHealth(transcriptPath), projects: pathHealth(projectsPath) }));
         } catch {

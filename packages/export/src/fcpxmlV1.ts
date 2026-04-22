@@ -116,7 +116,7 @@ export function exportFcpxmlV1(
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<fcpxml version="1.10">
+<fcpxml version="1.9">
   <resources>
     <format id="r1" name="FFVideoFormatRateUndefined" frameDuration="${frameDuration}" width="${options.width ?? 1920}" height="${options.height ?? 1080}" colorSpace="1-1-1 (Rec. 709)" />
     <asset id="r2" name="${xmlEscape(mediaName)}" src="${xmlEscape(pathToFileUrl(source.path))}" start="${sequenceTcStart}" duration="${mediaDuration}" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000" />

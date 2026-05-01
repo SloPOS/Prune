@@ -130,6 +130,10 @@ type SubtitleTokenInput = {
 const jobs = new Map<string, TranscribeJob>();
 const exportJobs = new Map<string, ExportJob>();
 const fcpxmlJobs = new Map<string, FcpxmlExportJob>();
+const edlJobs = new Map<string, EdlExportJob>();
+const premiereXmlJobs = new Map<string, PremiereXmlExportJob>();
+const aeMarkerJobs = new Map<string, MarkerExportJob>();
+const aafBridgeJobs = new Map<string, any>();
 
 const RENDER_STATUS_PATH = path.resolve(REPO_ROOT, "data", "render-status.json");
 let latestRenderStatus: RenderStatusSnapshot = (() => {
@@ -382,6 +386,11 @@ function sanitizeProjectName(raw: string): string {
   const name = String(raw || "Project").trim();
   return name.replace(/[^a-zA-Z0-9 _.-]/g, "_").slice(0, 80) || "Project";
 }
+
+function projectsDir(): string {
+  return path.resolve(studioSettings.projectsDir || DEFAULT_SETTINGS.projectsDir || "data/projects");
+}
+
 
 function normalizeRange(input: RangeInput): { startSec: number; endSec: number } | null {
   const start = Number(input.sourceStartSec ?? input.startSec);
@@ -1192,9 +1201,10 @@ function studioApiPlugin(): Plugin {
           fs.writeFileSync(out, JSON.stringify(payload, null, 2), "utf-8");
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true, projectId: id, projectName, outputPath: out }));
-        } catch {
+        } catch (err) {
+          console.error("Failed to save project:", err);
           res.statusCode = 500;
-          res.end(JSON.stringify({ error: "Failed to save project" }));
+          res.end(JSON.stringify({ error: `Failed to save project: ${err instanceof Error ? err.message : String(err)}` }));
         }
       });
 
@@ -1882,6 +1892,7 @@ function studioApiPlugin(): Plugin {
             }
             pushLog(job, `Running Whisper (${model}, ${device}, ${computeType}, beam=${beamSize}${vadFilter ? ", vad" : ""})`);
 
+            let whisperStderr = "";
             const tr = spawn("bash", ["-lc", `${command} "${wavPath}" --model "${model}" --device "${device}" --compute-type "${computeType}" --beam-size "${beamSize}" ${vadFilter ? "--vad-filter" : ""} --language "${language}" --out "${transcriptAbsPath}"`], {
               cwd: REPO_ROOT,
             });
@@ -1896,6 +1907,7 @@ function studioApiPlugin(): Plugin {
             });
             tr.stderr.on("data", (d) => {
               const text = String(d);
+              whisperStderr += text;
               const sec = parseWhisperProgressSec(text);
               if (sec !== undefined) {
                 job.transcribedSec = Math.max(job.transcribedSec ?? 0, sec);
@@ -1913,7 +1925,8 @@ function studioApiPlugin(): Plugin {
               } else {
                 job.status = "error";
                 job.phase = "error";
-                job.error = `Whisper failed (${trCode})`;
+                const tail = whisperStderr.trim().split("\n").slice(-5).join(" | ");
+                job.error = `Whisper failed (${trCode}): ${tail || "no stderr"}`;
               }
             });
           });
@@ -2607,7 +2620,7 @@ function studioApiPlugin(): Plugin {
             return;
           }
 
-          const sourceMetadata = probeSourceMetadata(absMedia);
+          const sourceMetadata = probeFcpxmlMetadata(absMedia);
           const source = {
             path: absMedia,
             name: path.basename(absMedia),
@@ -2616,17 +2629,18 @@ function studioApiPlugin(): Plugin {
             durationSec: sourceMetadata.durationSec,
           };
 
-          const manifest = buildAafBridgeManifest(keepRanges as KeepRange[], source);
-          const fcpxml = exportFcpxmlV1(keepRanges as KeepRange[], source, {
+          const timelineRanges = toTimelineKeepRanges(keepRanges);
+          const manifest = buildAafBridgeManifest(timelineRanges, source);
+          const fcpxml = exportFcpxmlV1(timelineRanges, source, {
             projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             eventName: "prune",
           });
-          const edl = exportEdlCmx3600(keepRanges as KeepRange[], source, {
+          const edl = exportEdlCmx3600(timelineRanges, source, {
             title: outputName.replace(/\.zip$/, "").toUpperCase().slice(0, 64),
             reel: source.name,
           });
-          const premiereXml = exportPremiereXml(keepRanges as KeepRange[], source, {
+          const premiereXml = exportPremiereXml(timelineRanges, source, {
             projectName: outputName.replace(/-aaf-bridge\.zip$/, ""),
             sequenceName: outputName.replace(/-aaf-bridge\.zip$/, ""),
           });

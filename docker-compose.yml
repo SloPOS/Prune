@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   prune:
-    image: fauxrhino/prune:latest
+    build: .
     container_name: prune
     restart: unless-stopped
     ports:

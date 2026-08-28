@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Typechecks the backend too: the studio-local-api plugin lives in
+      # apps/editor-web/vite.config.ts, which `vite build` never compiles.
+      # Without this step, undefined identifiers in the API handlers ship
+      # green and only fail at runtime.
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build app
         run: npm run build
 

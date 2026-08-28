@@ -1,0 +1,21 @@
+# Normalize to LF in the repository by default.
+* text=auto eol=lf
+
+# These MUST be LF regardless of contributor platform: a CRLF shebang
+# fails on Linux/macOS with "bad interpreter: ... ^M", which would break
+# the one-command installer and the Docker image build.
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.py        text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Binary assets: never touch.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.mp4       binary
+*.zip       binary

@@ -12,7 +12,13 @@ const webRoot = path.join(repoRoot, 'apps', 'editor-web');
 const distRoot = path.join(webRoot, 'dist');
 const indexPath = path.join(distRoot, 'index.html');
 const PORT = Number(process.env.PORT || 4173);
-const HOST = process.env.HOST || '0.0.0.0';
+// Bind to loopback by default. The API is unauthenticated and exposes
+// filesystem browsing (/api/system/dirs), so it must not reach the LAN
+// unless the operator explicitly opts in with HOST=0.0.0.0.
+// The Docker image and compose file set HOST=0.0.0.0 deliberately: there
+// the container boundary is the isolation, and the published port is the
+// intended exposure.
+const HOST = process.env.HOST || '127.0.0.1';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

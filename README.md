@@ -8,6 +8,8 @@
 
   [![Made by FauxRhino](https://img.shields.io/badge/Made%20by-FauxRhino-forestgreen?style=flat-square)](mailto:Faux@fauxrhino.com)
   [![Self-Hosted](https://img.shields.io/badge/Deployment-Self--Hosted-blue?style=flat-square)](#)
+  <hr>
+  Come hang out on Discord: https://discord.gg/URUV5cV6Vc
 </div>
 
 <br />

@@ -2943,6 +2943,22 @@ function studioApiPlugin(): Plugin {
   };
 }
 
+// Single source of truth for the app version: the root package.json.
+// Injected at build time so the About dialog cannot drift from the version
+// the release is actually tagged and packaged as.
+const APP_VERSION: string = (() => {
+  try {
+    return String(
+      JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8")).version || "0.0.0",
+    );
+  } catch {
+    return "0.0.0";
+  }
+})();
+
 export default defineConfig({
   plugins: [react(), studioApiPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
 });

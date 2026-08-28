@@ -118,10 +118,51 @@ Send your timeline directly to your heavy-duty editor of choice:
 
 ##  Quick Start & Deployment
 
+> **Security note:** Prune's API is unauthenticated and can browse the host
+> filesystem, so treat it as a tool on your own machine rather than a public
+> service. Outside Docker it binds to `127.0.0.1` by default. Only expose it
+> on a network you trust, and never put it directly on the public internet.
+
+### Docker Compose (Recommended)
+
+```bash
+git clone https://github.com/SloPOS/Prune.git
+cd Prune
+docker compose up -d --build
+```
+
+Compose builds the image from your checkout, so you always run the code you
+cloned.
+
+The port is published on all interfaces so server and NAS deployments work
+out of the box. To restrict Prune to the local machine:
+
+```bash
+PRUNE_BIND=127.0.0.1 docker compose up -d
+```
+
+**App URL:** Once the container is running, open `http://localhost:4173`
+
+Prebuilt multi-architecture images (linux/amd64 and linux/arm64) are also
+published for each release if you would rather not build:
+
+```bash
+docker run -d -p 4173:4173 -v prune_data:/data fauxrhino/prune:1.0.0
+```
+
 ### One-Command Installer
-For the fastest automated setup, run our installation script directly in your terminal:
+
+For an automated setup on Linux or macOS:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh | bash
+```
+
+The installer pins to the latest tagged release. Override it to track the
+development branch or pick a specific version:
+
+```bash
+PRUNE_REF=main curl -fsSL https://raw.githubusercontent.com/SloPOS/Prune/main/scripts/install-prune.sh | bash
 ```
 
 ### Homebrew (macOS)
@@ -136,37 +177,32 @@ prune
 
 Then open: `http://localhost:4173`
 
-
-### Docker Compose (Recommended)
-
-The easiest and most reliable way to run Prune locally is via Docker.
-
-```bash
-git clone https://github.com/SloPOS/Prune.git
-cd Prune
-docker compose up -d --build
-
-```
-
-**App URL:** Once the container is running, open your browser and head to: `http://localhost:4173`
-
 ### Manual Local Install
 
-If you prefer to run the environment manually without Docker, ensure your system has the following installed:
+If you prefer to run the environment manually without Docker, ensure your
+system has the following installed:
 
 * Node.js 20+
 * Python 3.10+
 * ffmpeg + ffprobe (must be added to your system PATH)
 
 ```bash
-npm install
-npm run dev -w @prune/editor-web
-
+npm ci
+npm run build
+npm run start:prod
 ```
 
-Once the server starts, open the local Vite URL shown in your terminal.
+Then open `http://localhost:4173`.
 
----
+To reach Prune from another machine on your network, bind it explicitly --
+read the security note above first:
+
+```bash
+HOST=0.0.0.0 npm run start:prod
+```
+
+For frontend work with hot reload use `npm run dev`; that serves the Vite
+dev server and is not intended as a production command.
 
 ##  Validation Suites
 
@@ -179,6 +215,19 @@ npm run test:interop
 ```
 
 These suites validate timeline parity and continuity across all export formats, and run contract checks for the download behaviors.
+
+The full gate CI runs, including the typecheck that covers the backend API
+plugin in `apps/editor-web/vite.config.ts`:
+
+```bash
+npm run ci
+```
+
+---
+
+##  License
+
+Released under the [MIT License](LICENSE).
 
 ---
 
